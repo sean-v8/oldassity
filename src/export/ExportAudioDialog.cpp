@@ -744,7 +744,7 @@ void ExportAudioDialog::UpdateLabelExportSettings(const ExportPlugin& plugin, in
 
       // Numbering files...
       if( !byName ) {
-         name.Printf(wxT("%s-%02d"), prefix, fileIndex + 1);
+         name.Printf(wxT("%s%02d"), prefix, fileIndex + 1);
       } else if( addNumber ) {
          // Following discussion with GA, always have 2 digits
          // for easy file-name sorting (on Windows)
@@ -833,7 +833,7 @@ void ExportAudioDialog::UpdateTrackExportSettings(const ExportPlugin& plugin, in
          }
       }
       else {
-         name = (wxString::Format(wxT("%s-%02d"), prefix, fileIndex+1));
+         name = (wxString::Format(wxT("%s%02d"), prefix, fileIndex+1));
       }
 
       Internat::SanitiseFilename(name, wxT("_"));
