@@ -35,7 +35,14 @@ enum class NumValidatorStyle : int
     TWO_TRAILING_ZEROES   = 0x10,
     THREE_TRAILING_ZEROES = 0x20,
     FOUR_TRAILING_ZEROES = 0x40,
-    FIVE_TRAILING_ZEROES = 0x80
+    FIVE_TRAILING_ZEROES = 0x80,
+    SIX_TRAILING_ZEROES = 0x100,
+    SEVEN_TRAILING_ZEROES = 0x200,
+    EIGHT_TRAILING_ZEROES = 0x400,
+    NINE_TRAILING_ZEROES = 0x800,
+    TEN_TRAILING_ZEROES = 0x1000,
+    ELEVEN_TRAILING_ZEROES = 0x2000,
+    TWELVE_TRAILING_ZEROES = 0x4000
 };
 
 inline NumValidatorStyle operator | (NumValidatorStyle x, NumValidatorStyle y)
@@ -306,6 +313,20 @@ protected:
         wxASSERT_MSG( !(style & NumValidatorStyle::FOUR_TRAILING_ZEROES),
                       wxT("This style doesn't make sense for integers.") );
         wxASSERT_MSG( !(style & NumValidatorStyle::FIVE_TRAILING_ZEROES),
+                      wxT("This style doesn't make sense for integers.") );
+        wxASSERT_MSG( !(style & NumValidatorStyle::SIX_TRAILING_ZEROES),
+                      wxT("This style doesn't make sense for integers.") );
+        wxASSERT_MSG( !(style & NumValidatorStyle::SEVEN_TRAILING_ZEROES),
+                      wxT("This style doesn't make sense for integers.") );
+        wxASSERT_MSG( !(style & NumValidatorStyle::EIGHT_TRAILING_ZEROES),
+                      wxT("This style doesn't make sense for integers.") );
+        wxASSERT_MSG( !(style & NumValidatorStyle::NINE_TRAILING_ZEROES),
+                      wxT("This style doesn't make sense for integers.") );
+        wxASSERT_MSG( !(style & NumValidatorStyle::TEN_TRAILING_ZEROES),
+                      wxT("This style doesn't make sense for integers.") );
+        wxASSERT_MSG( !(style & NumValidatorStyle::ELEVEN_TRAILING_ZEROES),
+                      wxT("This style doesn't make sense for integers.") );
+        wxASSERT_MSG( !(style & NumValidatorStyle::TWELVE_TRAILING_ZEROES),
                       wxT("This style doesn't make sense for integers.") );
     }
 
