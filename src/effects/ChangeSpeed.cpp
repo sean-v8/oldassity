@@ -326,15 +326,15 @@ std::unique_ptr<EffectEditor> EffectChangeSpeed::PopulateOrExchange(
       {
          mpTextCtrl_Multiplier = S.Id(ID_Multiplier)
             .Validator<FloatingPointValidator<double>>(
-               3, &mMultiplier,
-               NumValidatorStyle::THREE_TRAILING_ZEROES,
+               5, &mMultiplier,
+               NumValidatorStyle::FIVE_TRAILING_ZEROES,
                Percentage.min / 100.0, ((Percentage.max / 100.0) + 1) )
             .AddTextBox(XXO("&Speed Multiplier:"), L"", 12);
 
          mpTextCtrl_PercentChange = S.Id(ID_PercentChange)
             .Validator<FloatingPointValidator<double>>(
-               3, &m_PercentChange,
-               NumValidatorStyle::THREE_TRAILING_ZEROES,
+               5, &m_PercentChange,
+               NumValidatorStyle::FIVE_TRAILING_ZEROES,
                Percentage.min, Percentage.max )
             .AddTextBox(XXO("Percent C&hange:"), L"", 12);
       }

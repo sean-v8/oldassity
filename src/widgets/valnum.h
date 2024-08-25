@@ -33,7 +33,9 @@ enum class NumValidatorStyle : int
     NO_TRAILING_ZEROES    = 0x4,
     ONE_TRAILING_ZERO     = 0x8,
     TWO_TRAILING_ZEROES   = 0x10,
-    THREE_TRAILING_ZEROES = 0x20
+    THREE_TRAILING_ZEROES = 0x20,
+    FOUR_TRAILING_ZEROES = 0x40,
+    FIVE_TRAILING_ZEROES = 0x80
 };
 
 inline NumValidatorStyle operator | (NumValidatorStyle x, NumValidatorStyle y)
@@ -300,6 +302,10 @@ protected:
         wxASSERT_MSG( !(style & NumValidatorStyle::TWO_TRAILING_ZEROES),
                       wxT("This style doesn't make sense for integers.") );
         wxASSERT_MSG( !(style & NumValidatorStyle::THREE_TRAILING_ZEROES),
+                      wxT("This style doesn't make sense for integers.") );
+        wxASSERT_MSG( !(style & NumValidatorStyle::FOUR_TRAILING_ZEROES),
+                      wxT("This style doesn't make sense for integers.") );
+        wxASSERT_MSG( !(style & NumValidatorStyle::FIVE_TRAILING_ZEROES),
                       wxT("This style doesn't make sense for integers.") );
     }
 
