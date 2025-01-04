@@ -307,8 +307,8 @@ std::unique_ptr<EffectEditor> EffectChangePitch::PopulateOrExchange(
             m_pTextCtrl_FromFrequency = S.Id(ID_FromFrequency)
                .Name(XO("from (Hz)"))
                .Validator<FloatingPointValidator<double>>(
-                  3, &m_FromFrequency,
-                  NumValidatorStyle::THREE_TRAILING_ZEROES,
+                  12, &m_FromFrequency,
+                  NumValidatorStyle::TWELVE_TRAILING_ZEROES,
                   0.0
                )
                .AddTextBox(XXO("f&rom"), wxT(""), 12);
@@ -316,8 +316,8 @@ std::unique_ptr<EffectEditor> EffectChangePitch::PopulateOrExchange(
             m_pTextCtrl_ToFrequency = S.Id(ID_ToFrequency)
                .Name(XO("to (Hz)"))
                .Validator<FloatingPointValidator<double>>(
-                  3, &m_ToFrequency,
-                  NumValidatorStyle::THREE_TRAILING_ZEROES,
+                  12, &m_ToFrequency,
+                  NumValidatorStyle::TWELVE_TRAILING_ZEROES,
                   0.0
                )
                .AddTextBox(XXO("t&o"), wxT(""), 12);
@@ -330,8 +330,8 @@ std::unique_ptr<EffectEditor> EffectChangePitch::PopulateOrExchange(
          {
             m_pTextCtrl_PercentChange = S.Id(ID_PercentChange)
                .Validator<FloatingPointValidator<double>>(
-                  3, &m_dPercentChange,
-                  NumValidatorStyle::THREE_TRAILING_ZEROES,
+                  12, &m_dPercentChange,
+                  NumValidatorStyle::TWELVE_TRAILING_ZEROES,
                   Percentage.min, Percentage.max )
                .AddTextBox(XXO("Percent C&hange:"), L"", 12);
          }

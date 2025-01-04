@@ -197,7 +197,7 @@ std::unique_ptr<EffectEditor> EffectChangeTempo::PopulateOrExchange(
 {
    mUIParent = S.GetParent();
 
-   enum { precision = 2 };
+   enum { precision = 12 };
 
    S.StartVerticalLay(0);
    {
@@ -206,7 +206,7 @@ std::unique_ptr<EffectEditor> EffectChangeTempo::PopulateOrExchange(
       {
          m_pTextCtrl_PercentChange = S.Id(ID_PercentChange)
             .Validator<FloatingPointValidator<double>>(
-               3, &m_PercentChange, NumValidatorStyle::THREE_TRAILING_ZEROES,
+               12, &m_PercentChange, NumValidatorStyle::TWELVE_TRAILING_ZEROES,
                Percentage.min, Percentage.max )
             .AddTextBox(XXO("Percent C&hange:"), L"", 12);
       }
@@ -230,8 +230,8 @@ std::unique_ptr<EffectEditor> EffectChangeTempo::PopulateOrExchange(
                /* i18n-hint: changing tempo "from" one value "to" another */
                .Name(XO("Beats per minute, from"))
                .Validator<FloatingPointValidator<double>>(
-                  3, &m_FromBPM,
-                  NumValidatorStyle::THREE_TRAILING_ZEROES
+                  12, &m_FromBPM,
+                  NumValidatorStyle::TWELVE_TRAILING_ZEROES
                      | NumValidatorStyle::ZERO_AS_BLANK)
                /* i18n-hint: changing tempo "from" one value "to" another */
                .AddTextBox(XXC("&from", "change tempo"), wxT(""), 12);
@@ -240,8 +240,8 @@ std::unique_ptr<EffectEditor> EffectChangeTempo::PopulateOrExchange(
                /* i18n-hint: changing tempo "from" one value "to" another */
                .Name(XO("Beats per minute, to"))
                .Validator<FloatingPointValidator<double>>(
-                  3, &m_ToBPM,
-                  NumValidatorStyle::THREE_TRAILING_ZEROES
+                  12, &m_ToBPM,
+                  NumValidatorStyle::TWELVE_TRAILING_ZEROES
                      | NumValidatorStyle::ZERO_AS_BLANK)
                /* i18n-hint: changing tempo "from" one value "to" another */
                .AddTextBox(XXC("&to", "change tempo"), wxT(""), 12);
@@ -260,12 +260,12 @@ std::unique_ptr<EffectEditor> EffectChangeTempo::PopulateOrExchange(
                        // user selection.
                .Validator<FloatingPointValidator<double>>(
                   precision, &m_FromLength,
-                  NumValidatorStyle::TWO_TRAILING_ZEROES)
+                  NumValidatorStyle::TWELVE_TRAILING_ZEROES)
                /* i18n-hint: changing tempo "from" one value "to" another */
                .AddTextBox(XXC("from", "change tempo"), wxT(""), 12);
             m_pTextCtrl_ToLength = S.Id(ID_ToLength)
                .Validator<FloatingPointValidator<double>>(
-                  2, &m_ToLength, NumValidatorStyle::TWO_TRAILING_ZEROES,
+                  12, &m_ToLength, NumValidatorStyle::TWELVE_TRAILING_ZEROES,
                   // min and max need same precision as what we're validating (bug 963)
                   RoundValue( precision,
                      (m_FromLength * 100.0) / (100.0 + Percentage.max) ),
