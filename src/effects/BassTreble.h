@@ -90,13 +90,13 @@ private:
    const EffectParameterMethods& Parameters() const override;
 
    static constexpr EffectParameter Bass{ &EffectBassTrebleSettings::mBass,
-                         L"Bass",          EffectBassTrebleSettings::bassDefault,     -30.0,   30.0,    1  };
+                         L"Bass",          EffectBassTrebleSettings::bassDefault,     -60.0,   30.0,    1  };
 
    static constexpr EffectParameter Treble{ &EffectBassTrebleSettings::mTreble,
-                         L"Treble",          EffectBassTrebleSettings::trebleDefault, -30.0,   30.0,    1  };
+                         L"Treble",          EffectBassTrebleSettings::trebleDefault, -60.0,   30.0,    1  };
 
    static constexpr EffectParameter Gain{ &EffectBassTrebleSettings::mGain,
-                         L"Gain",          EffectBassTrebleSettings::gainDefault,     -30.0,   30.0,    1  };
+                         L"Gain",          EffectBassTrebleSettings::gainDefault,     -60.0,   30.0,    1  };
 
    static constexpr EffectParameter Link{ &EffectBassTrebleSettings::mLink,
                          L"Link Sliders",  EffectBassTrebleSettings::linkDefault,      false,  true,    1  };
