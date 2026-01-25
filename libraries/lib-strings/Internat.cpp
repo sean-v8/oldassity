@@ -98,11 +98,6 @@ void Internat::Init()
    auto forbid = wxFileName::GetForbiddenChars(format);
 
    for (auto cc: forbid) {
-#if defined(__WXGTK__)
-      if (cc == wxT('*') || cc == wxT('?')) {
-         continue;
-      }
-#endif
       exclude.push_back(wxString{ cc });
    }
 
@@ -110,7 +105,7 @@ void Internat::Init()
    //auto separators = wxFileName::GetPathSeparators(format);
 
    // Bug 1441 exclude all separators from filenames on all platforms.
-   auto separators = wxString("\\/");
+   auto separators = wxString("\\/<>");
 
    for(auto cc: separators) {
       if (forbid.Find(cc) == wxNOT_FOUND)
