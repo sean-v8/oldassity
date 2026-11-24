@@ -37,6 +37,7 @@
         <Name>EQ and Filters</Name>
         <Effects>
             <Effect>Bass and Treble</Effect>
+            <Effect>Four Band</Effect>
             <Effect>Graphic EQ</Effect>
             <Effect>Filter Curve EQ</Effect>
             <Effect>High-Pass Filter</Effect>

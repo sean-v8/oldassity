@@ -51,6 +51,10 @@ public:
     */
    virtual bool UpdateUI();
 
+   // Optional settings dialog scoped to this editor and its effect instance.
+   virtual bool HasOptions() const { return false; }
+   virtual void ShowOptions() {}
+
    /*!
     Default implementation returns false
     @return true if using a native plug-in UI, not widgets

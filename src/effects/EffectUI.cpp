@@ -710,7 +710,7 @@ void EffectUIHost::OnMenu(wxCommandEvent & WXUNUSED(evt))
       ->Enable(mEffectUIHost.CanExportPresets());
    menu.AppendSeparator();
    menu.Append(kOptionsID, _("Options..."))
-      ->Enable(mEffectUIHost.HasOptions());
+      ->Enable(mEffectUIHost.HasOptions() || (mpEditor && mpEditor->HasOptions()));
    menu.AppendSeparator();
    
    {
@@ -923,7 +923,10 @@ void EffectUIHost::OnExport(wxCommandEvent & WXUNUSED(evt))
 
 void EffectUIHost::OnOptions(wxCommandEvent & WXUNUSED(evt))
 {
-   mClient.ShowOptions(mEffectUIHost);
+   if (mpEditor && mpEditor->HasOptions())
+      mpEditor->ShowOptions();
+   else
+      mClient.ShowOptions(mEffectUIHost);
    
    return;
 }

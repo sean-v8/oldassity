@@ -329,6 +329,8 @@ list( APPEND SOURCES
       effects/BasicEffectUIServices.h
       effects/BassTreble.cpp
       effects/BassTreble.h
+      effects/FourBand.cpp
+      effects/FourBand.h
       effects/Biquad.cpp
       effects/Biquad.h
       effects/ChangePitch.cpp
