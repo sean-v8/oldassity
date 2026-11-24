@@ -276,10 +276,11 @@ struct EffectFourBand::Editor final : EffectEditor
          return;
 
       auto options = mSettings;
+      std::vector<wxWindow*> tabOrder;
+      size_t focusedIndex = 0;
       wxDialogWrapper dialog{ mParent, wxID_ANY, XO("Four Band Options") };
       ShuttleGui S{ &dialog, eIsCreating };
 
-      std::vector<wxWindow*> tabOrder;
       const auto addField = [&S, &options, &tabOrder](const auto& parameter,
                              const TranslatableString& label, int precision) {
          tabOrder.push_back(S.Validator<FloatingPointValidator<double>>(
@@ -321,8 +322,14 @@ struct EffectFourBand::Editor final : EffectEditor
          if (auto* button = dialog.FindWindow(id))
             tabOrder.push_back(button);
 
-      // The fields have different static-box parents on GTK.
-      dialog.Bind(wxEVT_CHAR_HOOK, [tabOrder](wxKeyEvent& event) {
+      // Track the focused field before GTK dispatches the Tab key.
+      for (size_t index = 0; index < tabOrder.size(); ++index)
+         tabOrder[index]->Bind(wxEVT_SET_FOCUS, [&focusedIndex, index](wxFocusEvent& event) {
+            focusedIndex = index;
+            event.Skip();
+         });
+
+      dialog.Bind(wxEVT_CHAR_HOOK, [&tabOrder, &focusedIndex](wxKeyEvent& event) {
          if (event.GetKeyCode() != WXK_TAB ||
              (event.GetModifiers() & ~wxMOD_SHIFT) != 0)
          {
@@ -330,13 +337,10 @@ struct EffectFourBand::Editor final : EffectEditor
             return;
          }
 
-         const auto focus = std::find(
-            tabOrder.begin(), tabOrder.end(), wxWindow::FindFocus());
-         if (event.ShiftDown())
-            (focus == tabOrder.begin() ? tabOrder.back() : *(focus - 1))->SetFocus();
-         else
-            (focus == tabOrder.end() || focus + 1 == tabOrder.end()
-               ? tabOrder.front() : *(focus + 1))->SetFocus();
+         const auto count = tabOrder.size();
+         const auto step = event.ShiftDown() ? count - 1 : 1;
+         focusedIndex = (focusedIndex + step) % count;
+         tabOrder[focusedIndex]->SetFocus();
       });
       dialog.Fit();
       dialog.CentreOnParent();
@@ -355,20 +359,20 @@ struct EffectFourBand::Editor final : EffectEditor
       S.SetBorder(5);
       S.AddSpace(0, 5);
 
-      S.StartStatic(XO("Tone controls"));
+      S.StartStatic(XO("Tone controls (dB)"));
       S.StartMultiColumn(4, wxEXPAND);
-      S.SetStretchyCol(2);
-      AddControl(S, 0, Bass, BassEnabled.mem, XXO("Ba&ss (dB):"), XO("Bass"));
-      AddControl(S, 1, LowMid, LowMidEnabled.mem, XXO("&Low Mid (dB):"), XO("Low Mid"));
-      AddControl(S, 2, HighMid, HighMidEnabled.mem, XXO("&High Mid (dB):"), XO("High Mid"));
-      AddControl(S, 3, Treble, TrebleEnabled.mem, XXO("&Treble (dB):"), XO("Treble"));
+      S.SetStretchyCol(3);
+      AddControl(S, 0, Bass, BassEnabled.mem, XXO("Ba&ss:"), XO("Bass"));
+      AddControl(S, 1, LowMid, LowMidEnabled.mem, XXO("&Low Mid:"), XO("Low Mid"));
+      AddControl(S, 2, HighMid, HighMidEnabled.mem, XXO("&High Mid:"), XO("High Mid"));
+      AddControl(S, 3, Treble, TrebleEnabled.mem, XXO("&Treble:"), XO("Treble"));
       S.EndMultiColumn();
       S.EndStatic();
 
-      S.StartStatic(XO("Output"));
+      S.StartStatic(XO("Output (dB)"));
       S.StartMultiColumn(4, wxEXPAND);
-      S.SetStretchyCol(2);
-      AddControl(S, 4, Gain, GainEnabled.mem, XXO("&Volume (dB):"), XO("Volume"));
+      S.SetStretchyCol(3);
+      AddControl(S, 4, Gain, GainEnabled.mem, XXO("&Volume:"), XO("Volume"));
       S.EndMultiColumn();
 
       mLink = S.AddCheckBox(XXO("L&ink Volume control to Tone controls"), mSettings.mLink);
@@ -393,19 +397,20 @@ private:
       auto& control = mControls[index];
       control.setting = parameter.mem;
       control.enabled = enabled;
-      control.text = S.Validator<FloatingPointValidator<double>>(
-         1, &(mSettings.*control.setting), NumValidatorStyle::DEFAULT,
-         parameter.min, parameter.max)
-         .AddTextBox(label, L"", 10);
-      control.slider = S.Name(name).Style(wxSL_HORIZONTAL)
-         .AddSlider({}, 0, parameter.max, parameter.min);
-
       control.power = safenew AButton(S.GetParent(), wxID_ANY,
          wxDefaultPosition, wxDefaultSize, true);
       const auto& on = theTheme.Image(bmpEffectOn);
       const auto& off = theTheme.Image(bmpEffectOff);
       control.power->SetImages(off, off, on, on, off);
       S.Name(XO("%s power").Format(name)).AddWindow(control.power);
+
+      control.text = S.Validator<FloatingPointValidator<double>>(
+         1, &(mSettings.*control.setting), NumValidatorStyle::DEFAULT,
+         parameter.min, parameter.max)
+         .AddTextBox(label, L"", 10);
+      control.slider = S.Name(name).Style(wxSL_HORIZONTAL)
+         .Size({ 240, -1 }).MinSize({ 240, -1 })
+         .AddSlider({}, 0, parameter.max, parameter.min);
 
       control.power->Bind(wxEVT_BUTTON, [this, index](wxCommandEvent&) {
          auto& changed = mControls[index];
