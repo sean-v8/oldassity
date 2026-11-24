@@ -10,6 +10,8 @@
 
 #include "MemoryX.h"
 
+#include <cstdint>
+
 // Make the symbol table non-empty
 UTILITY_API void lib_utility_dummy_symbol()
 {}
@@ -31,7 +33,7 @@ void *NonInterferingBase::operator new(std::size_t count, std::align_val_t al)
    // Adjust the pointer to a properly aligned one, with a space just before it
    // to remember the adjustment
    ptr += sizeof_align_val;
-   auto integer = reinterpret_cast<uintptr_t>(ptr);
+   auto integer = reinterpret_cast<std::uintptr_t>(ptr);
    const auto partial = integer % al_as_size;
    auto adjustment = partial ? al_as_size - partial : 0;
    integer += adjustment;
