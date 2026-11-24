@@ -47,6 +47,7 @@
 #include "EffectAutomationParameters.h"
 
 #include "TypedAny.h"
+#include <cstdint>
 #include <memory>
 #include <optional>
 #include <type_traits>
@@ -554,7 +555,7 @@ public:
    //! Correct definitions of it will likely depend on settings and state
    virtual size_t GetTailSize() const;
 
-   using SampleCount = uint64_t;
+   using SampleCount = std::uint64_t;
 
    /*!
     Default implementation returns 0
