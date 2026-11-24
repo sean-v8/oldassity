@@ -23,13 +23,18 @@ struct EffectFourBandSettings
    double mTreble { 0.0 };
    double mGain { 0.0 };
    bool mLink { false };
+   bool mBassEnabled { true };
+   bool mLowMidEnabled { true };
+   bool mHighMidEnabled { true };
+   bool mTrebleEnabled { true };
+   bool mGainEnabled { true };
    double mBassHz { 250.0 };
    double mLowMidHz { 500.0 };
    double mHighMidHz { 2000.0 };
    double mTrebleHz { 4000.0 };
    double mBassSlope { 0.4 };
-   double mLowMidQ { 1.0 };
-   double mHighMidQ { 1.0 };
+   double mLowMidQ { 0.8 };
+   double mHighMidQ { 0.8 };
    double mTrebleSlope { 0.4 };
 };
 
@@ -101,6 +106,21 @@ private:
    static constexpr EffectParameter TrebleSlope{
       &EffectFourBandSettings::mTrebleSlope, L"Treble Slope",
       EffectFourBandSettings{}.mTrebleSlope, 0.01, 1.0, 1 };
+   static constexpr EffectParameter BassEnabled{
+      &EffectFourBandSettings::mBassEnabled, L"BassEnabled",
+      true, false, true, 1 };
+   static constexpr EffectParameter LowMidEnabled{
+      &EffectFourBandSettings::mLowMidEnabled, L"LowMidEnabled",
+      true, false, true, 1 };
+   static constexpr EffectParameter HighMidEnabled{
+      &EffectFourBandSettings::mHighMidEnabled, L"HighMidEnabled",
+      true, false, true, 1 };
+   static constexpr EffectParameter TrebleEnabled{
+      &EffectFourBandSettings::mTrebleEnabled, L"TrebleEnabled",
+      true, false, true, 1 };
+   static constexpr EffectParameter GainEnabled{
+      &EffectFourBandSettings::mGainEnabled, L"GainEnabled",
+      true, false, true, 1 };
 };
 
 #endif

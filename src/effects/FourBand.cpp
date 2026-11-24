@@ -11,11 +11,14 @@
 
 #include "FourBand.h"
 
+#include "AllThemeResources.h"
 #include "EffectEditor.h"
 #include "LoadEffects.h"
 #include "ShuttleGui.h"
+#include "Theme.h"
 #include "WaveTrack.h"
 #include "wxPanelWrapper.h"
+#include "../widgets/AButton.h"
 #include "../widgets/valnum.h"
 
 #include <algorithm>
@@ -33,7 +36,8 @@ const EffectParameterMethods& EffectFourBand::Parameters() const
    static CapturedParameters<EffectFourBand,
       Bass, LowMid, HighMid, Treble, Gain, Link,
       BassHz, LowMidHz, HighMidHz, TrebleHz,
-      BassSlope, LowMidQ, HighMidQ, TrebleSlope
+      BassSlope, LowMidQ, HighMidQ, TrebleSlope,
+      BassEnabled, LowMidEnabled, HighMidEnabled, TrebleEnabled, GainEnabled
    > parameters;
    return parameters;
 }
@@ -150,15 +154,19 @@ size_t ProcessFilters(const EffectFourBandSettings& settings, FilterState& state
 {
    auto& filters = state.filters;
    filters[0].Configure(FilterType::LowShelf,
-      { settings.mBassHz, settings.mBassSlope, settings.mBass }, state.sampleRate);
+      { settings.mBassHz, settings.mBassSlope,
+        settings.mBassEnabled ? settings.mBass : 0.0 }, state.sampleRate);
    filters[1].Configure(FilterType::Bell,
-      { settings.mLowMidHz, settings.mLowMidQ, settings.mLowMid }, state.sampleRate);
+      { settings.mLowMidHz, settings.mLowMidQ,
+        settings.mLowMidEnabled ? settings.mLowMid : 0.0 }, state.sampleRate);
    filters[2].Configure(FilterType::Bell,
-      { settings.mHighMidHz, settings.mHighMidQ, settings.mHighMid }, state.sampleRate);
+      { settings.mHighMidHz, settings.mHighMidQ,
+        settings.mHighMidEnabled ? settings.mHighMid : 0.0 }, state.sampleRate);
    filters[3].Configure(FilterType::HighShelf,
-      { settings.mTrebleHz, settings.mTrebleSlope, settings.mTreble }, state.sampleRate);
+      { settings.mTrebleHz, settings.mTrebleSlope,
+        settings.mTrebleEnabled ? settings.mTreble : 0.0 }, state.sampleRate);
 
-   const auto volume = DB_TO_LINEAR(settings.mGain);
+   const auto volume = DB_TO_LINEAR(settings.mGainEnabled ? settings.mGain : 0.0);
    for (size_t i = 0; i < length; ++i)
    {
       double sample = input[i];
@@ -253,6 +261,7 @@ struct EffectFourBand::Editor final : EffectEditor
       {
          UpdateText(control);
          UpdateSlider(control);
+         UpdatePower(control);
       }
       mLink->SetValue(mSettings.mLink);
       EnableApply(mParent, mParent->Validate());
@@ -270,11 +279,12 @@ struct EffectFourBand::Editor final : EffectEditor
       wxDialogWrapper dialog{ mParent, wxID_ANY, XO("Four Band Options") };
       ShuttleGui S{ &dialog, eIsCreating };
 
-      const auto addField = [&S, &options](const auto& parameter,
+      std::vector<wxWindow*> tabOrder;
+      const auto addField = [&S, &options, &tabOrder](const auto& parameter,
                              const TranslatableString& label, int precision) {
-         S.Validator<FloatingPointValidator<double>>(
+         tabOrder.push_back(S.Validator<FloatingPointValidator<double>>(
             precision, &(options.*parameter.mem), NumValidatorStyle::DEFAULT,
-            parameter.min, parameter.max).AddTextBox(label, L"", 10);
+            parameter.min, parameter.max).AddTextBox(label, L"", 10));
       };
 
       S.SetBorder(5);
@@ -307,6 +317,27 @@ struct EffectFourBand::Editor final : EffectEditor
       S.EndStatic();
 
       S.AddStandardButtons(eOkButton | eCancelButton);
+      for (const auto id : { wxID_OK, wxID_CANCEL })
+         if (auto* button = dialog.FindWindow(id))
+            tabOrder.push_back(button);
+
+      // The fields have different static-box parents on GTK.
+      dialog.Bind(wxEVT_CHAR_HOOK, [tabOrder](wxKeyEvent& event) {
+         if (event.GetKeyCode() != WXK_TAB ||
+             (event.GetModifiers() & ~wxMOD_SHIFT) != 0)
+         {
+            event.Skip();
+            return;
+         }
+
+         const auto focus = std::find(
+            tabOrder.begin(), tabOrder.end(), wxWindow::FindFocus());
+         if (event.ShiftDown())
+            (focus == tabOrder.begin() ? tabOrder.back() : *(focus - 1))->SetFocus();
+         else
+            (focus == tabOrder.end() || focus + 1 == tabOrder.end()
+               ? tabOrder.front() : *(focus + 1))->SetFocus();
+      });
       dialog.Fit();
       dialog.CentreOnParent();
 
@@ -325,19 +356,19 @@ struct EffectFourBand::Editor final : EffectEditor
       S.AddSpace(0, 5);
 
       S.StartStatic(XO("Tone controls"));
-      S.StartMultiColumn(3, wxEXPAND);
+      S.StartMultiColumn(4, wxEXPAND);
       S.SetStretchyCol(2);
-      AddControl(S, 0, Bass, XXO("Ba&ss (dB):"), XO("Bass"));
-      AddControl(S, 1, LowMid, XXO("&Low Mid (dB):"), XO("Low Mid"));
-      AddControl(S, 2, HighMid, XXO("&High Mid (dB):"), XO("High Mid"));
-      AddControl(S, 3, Treble, XXO("&Treble (dB):"), XO("Treble"));
+      AddControl(S, 0, Bass, BassEnabled.mem, XXO("Ba&ss (dB):"), XO("Bass"));
+      AddControl(S, 1, LowMid, LowMidEnabled.mem, XXO("&Low Mid (dB):"), XO("Low Mid"));
+      AddControl(S, 2, HighMid, HighMidEnabled.mem, XXO("&High Mid (dB):"), XO("High Mid"));
+      AddControl(S, 3, Treble, TrebleEnabled.mem, XXO("&Treble (dB):"), XO("Treble"));
       S.EndMultiColumn();
       S.EndStatic();
 
       S.StartStatic(XO("Output"));
-      S.StartMultiColumn(3, wxEXPAND);
+      S.StartMultiColumn(4, wxEXPAND);
       S.SetStretchyCol(2);
-      AddControl(S, 4, Gain, XXO("&Volume (dB):"), XO("Volume"));
+      AddControl(S, 4, Gain, GainEnabled.mem, XXO("&Volume (dB):"), XO("Volume"));
       S.EndMultiColumn();
 
       mLink = S.AddCheckBox(XXO("L&ink Volume control to Tone controls"), mSettings.mLink);
@@ -349,15 +380,19 @@ private:
    struct Control
    {
       Setting setting{};
+      bool EffectFourBandSettings::*enabled{};
+      AButton* power{};
       wxTextCtrl* text{};
       wxSlider* slider{};
    };
 
    void AddControl(ShuttleGui& S, size_t index, const decltype(Gain)& parameter,
-      const TranslatableString& label, const TranslatableString& name)
+      bool EffectFourBandSettings::*enabled, const TranslatableString& label,
+      const TranslatableString& name)
    {
       auto& control = mControls[index];
       control.setting = parameter.mem;
+      control.enabled = enabled;
       control.text = S.Validator<FloatingPointValidator<double>>(
          1, &(mSettings.*control.setting), NumValidatorStyle::DEFAULT,
          parameter.min, parameter.max)
@@ -365,24 +400,45 @@ private:
       control.slider = S.Name(name).Style(wxSL_HORIZONTAL)
          .AddSlider({}, 0, parameter.max, parameter.min);
 
+      control.power = safenew AButton(S.GetParent(), wxID_ANY,
+         wxDefaultPosition, wxDefaultSize, true);
+      const auto& on = theTheme.Image(bmpEffectOn);
+      const auto& off = theTheme.Image(bmpEffectOff);
+      control.power->SetImages(off, off, on, on, off);
+      S.Name(XO("%s power").Format(name)).AddWindow(control.power);
+
+      control.power->Bind(wxEVT_BUTTON, [this, index](wxCommandEvent&) {
+         auto& changed = mControls[index];
+         if (!mParent->Validate() || !mParent->TransferDataFromWindow())
+         {
+            UpdatePower(changed);
+            return;
+         }
+
+         const auto oldGain = EffectiveGain(changed);
+         mSettings.*changed.enabled = changed.power->IsDown();
+         LinkVolume(changed, oldGain);
+         Commit();
+      });
+
       control.text->Bind(wxEVT_TEXT, [this, index](wxCommandEvent&) {
          auto& changed = mControls[index];
-         const auto oldGain = mSettings.*changed.setting;
+         const auto oldGain = EffectiveGain(changed);
          if (!EnableApply(mParent, mParent->TransferDataFromWindow()))
             return;
 
          UpdateSlider(changed);
-         LinkVolume(changed.setting, oldGain);
+         LinkVolume(changed, oldGain);
          Commit();
       });
 
       control.slider->Bind(wxEVT_SLIDER, [this, index](wxCommandEvent& event) {
          auto& changed = mControls[index];
-         const auto oldGain = mSettings.*changed.setting;
+         const auto oldGain = EffectiveGain(changed);
          mSettings.*changed.setting = event.GetInt();
          UpdateText(changed);
          if (mParent->Validate())
-            LinkVolume(changed.setting, oldGain);
+            LinkVolume(changed, oldGain);
          Commit();
       });
    }
@@ -398,13 +454,26 @@ private:
       control.slider->SetValue(static_cast<int>(mSettings.*control.setting));
    }
 
-   void LinkVolume(Setting setting, double oldGain)
+   void UpdatePower(const Control& control)
    {
-      if (!mLink->GetValue() || setting == &EffectFourBandSettings::mGain)
+      if (mSettings.*control.enabled)
+         control.power->PushDown();
+      else
+         control.power->PopUp();
+   }
+
+   double EffectiveGain(const Control& control) const
+   {
+      return mSettings.*control.enabled ? mSettings.*control.setting : 0.0;
+   }
+
+   void LinkVolume(const Control& control, double oldGain)
+   {
+      if (!mLink->GetValue() || control.setting == &EffectFourBandSettings::mGain)
          return;
 
       const auto estimate = [](double gain) { return gain > 0.0 ? gain / 2.0 : gain / 4.0; };
-      const auto change = estimate(mSettings.*setting) - estimate(oldGain);
+      const auto change = estimate(EffectiveGain(control)) - estimate(oldGain);
       mSettings.mGain = std::clamp(mSettings.mGain - change, Gain.min, Gain.max);
       UpdateText(mControls.back());
       UpdateSlider(mControls.back());
@@ -451,8 +520,11 @@ auto EffectFourBand::RealtimeSupport() const -> RealtimeSince
 bool EffectFourBand::CheckWhetherSkipEffect(const EffectSettings& settings) const
 {
    const auto& values = GetSettings(settings);
-   return values.mBass == 0.0 && values.mLowMid == 0.0 &&
-      values.mHighMid == 0.0 && values.mTreble == 0.0 && values.mGain == 0.0;
+   return (!values.mBassEnabled || values.mBass == 0.0) &&
+      (!values.mLowMidEnabled || values.mLowMid == 0.0) &&
+      (!values.mHighMidEnabled || values.mHighMid == 0.0) &&
+      (!values.mTrebleEnabled || values.mTreble == 0.0) &&
+      (!values.mGainEnabled || values.mGain == 0.0);
 }
 
 std::shared_ptr<EffectInstance> EffectFourBand::MakeInstance() const
