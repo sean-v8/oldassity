@@ -409,7 +409,7 @@ private:
          parameter.min, parameter.max)
          .AddTextBox(label, L"", 10);
       control.slider = S.Name(name).Style(wxSL_HORIZONTAL)
-         .Size({ 240, -1 }).MinSize({ 240, -1 })
+         .Size({ 180, -1 })
          .AddSlider({}, 0, parameter.max, parameter.min);
 
       control.power->Bind(wxEVT_BUTTON, [this, index](wxCommandEvent&) {
