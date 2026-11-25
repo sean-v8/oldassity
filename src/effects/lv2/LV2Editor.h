@@ -96,6 +96,7 @@ public:
    void OnSlider(wxCommandEvent & evt);
 
    void OnIdle(wxIdleEvent & evt);
+   void UpdateGraphicalUI();
    void OnSize(wxSizeEvent & evt);
 
    static std::shared_ptr<SuilHost> GetSuilHost();
@@ -153,6 +154,8 @@ public:
 
    //! This must be destroyed before mSuilInstance
    struct Timer : wxTimer {
+      explicit Timer(LV2Editor &editor) : mEditor{ editor } {}
+      LV2Editor &mEditor;
       LV2_External_UI_Widget* mExternalWidget{};
       void Notify() override;
    } mTimer;

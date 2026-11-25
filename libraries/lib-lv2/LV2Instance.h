@@ -90,6 +90,7 @@ private:
 
    size_t mUserBlockSize{};
 
+   bool mFirstRealtimeBlock{ true };
    bool mRolling{ true };
    bool mUseLatency{ false };
 };

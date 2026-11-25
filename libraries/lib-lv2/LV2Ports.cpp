@@ -88,6 +88,9 @@ void LV2AtomPortState::SendToDialog(
    std::function<void(const LV2_Atom *atom, uint32_t size)> handler)
 {
    const auto ring = mRing.get();
+   if (zix_ring_read_space(ring) == 0)
+      return;
+
    const auto minimumSize = mpPort->mMinimumSize;
    const auto space = std::make_unique<char[]>(minimumSize);
    auto atom = reinterpret_cast<LV2_Atom*>(space.get());

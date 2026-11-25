@@ -203,8 +203,7 @@ bool LV2Instance::RealtimeResume()
 
 bool LV2Instance::RealtimeProcessStart(MessagePackage &)
 {
-   for (auto & state : mPortStates.mAtomPortStates)
-      state->SendToInstance(mForge, mPositionFrame, mPositionSpeed);
+   mFirstRealtimeBlock = true;
    return true;
 }
 
@@ -228,8 +227,16 @@ size_t LV2Instance::RealtimeProcess(size_t group, EffectSettings &,
          port->mIndex,
          const_cast<float*>(port->mIsInput ? inbuf[i++] : outbuf[o++]));
 
-   if (mRolling)
+   if (mRolling) {
+      // A processing scope may run no audio blocks while paused. Leave UI
+      // messages queued until there is a processor ready to consume them.
+      if (mFirstRealtimeBlock) {
+         for (auto &state : mPortStates.mAtomPortStates)
+            state->SendToInstance(mForge, mPositionFrame, mPositionSpeed);
+         mFirstRealtimeBlock = false;
+      }
       lilv_instance_run(instance, numSamples);
+   }
    else
       while (--i >= 0)
          for (decltype(numSamples) s = 0; s < numSamples; s++)

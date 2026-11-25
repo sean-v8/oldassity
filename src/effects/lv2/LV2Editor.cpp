@@ -118,6 +118,7 @@ LV2Editor::LV2Editor(const StatelessEffectUIServices &effect, EffectType type,
    , mPortUIStates{ instance.GetPortStates(), ports }
    , mParent{ parent }
    , mUseGUI{ useGUI }
+   , mTimer{ *this }
 {
    if (mParent)
       mParent->PushEventHandler(this);
@@ -160,6 +161,9 @@ bool LV2Editor::ValidateUI()
 
 void LV2Editor::Disconnect()
 {
+   mTimer.Stop();
+   mTimer.mExternalWidget = nullptr;
+
    // Disconnect the plain UI output meters
    if (!mPlainUIControls.empty()) {
       size_t p = 0;
@@ -333,7 +337,6 @@ bool LV2Editor::BuildFancy(
       mParent->SetMinSize(wxDefaultSize);
       mTimer.mExternalWidget = static_cast<LV2_External_UI_Widget *>(
          suil_instance_get_widget(mUI.mSuilInstance.get()));
-      mTimer.Start(20);
       LV2_EXTERNAL_UI_SHOW(mTimer.mExternalWidget);
    } else {
       const auto widget = static_cast<WXWidget>(
@@ -389,6 +392,9 @@ bool LV2Editor::BuildFancy(
    wxEventLoop::SetBusyWaiting(true);
 #endif
 #endif
+
+   // An active event loop can delay idle events, including spectrum updates.
+   mTimer.Start(20);
 
    return true;
 }
@@ -819,15 +825,26 @@ void LV2Editor::OnSlider(wxCommandEvent &evt)
 
 void LV2Editor::Timer::Notify()
 {
-   if (mExternalWidget)
-      LV2_EXTERNAL_UI_RUN(mExternalWidget);
+   mEditor.UpdateGraphicalUI();
 }
 
-void LV2Editor::OnIdle(wxIdleEvent &evt)
+void LV2Editor::UpdateGraphicalUI()
 {
-   evt.Skip();
    if (!mUI.mSuilInstance)
       return;
+
+   if (!mExternalUIClosed) {
+      if (auto &atomState = mPortUIStates.mControlOut) {
+         atomState->SendToDialog([&](const LV2_Atom *atom, uint32_t size){
+            suil_instance_port_event(mUI.mSuilInstance.get(),
+               atomState->mpPort->mIndex, size,
+               LV2Symbols::urid_EventTransfer, atom);
+         });
+      }
+
+      if (mTimer.mExternalWidget)
+         LV2_EXTERNAL_UI_RUN(mTimer.mExternalWidget);
+   }
 
    if (mExternalUIClosed) {
       mExternalUIClosed = false;
@@ -836,27 +853,24 @@ void LV2Editor::OnIdle(wxIdleEvent &evt)
       return;
    }
 
-   if (mUIIdleInterface) {
+   if (mUIIdleInterface && mUIIdleInterface->idle) {
       const auto handle = suil_instance_get_handle(mUI.mSuilInstance.get());
-      if (mUIIdleInterface->idle && mUIIdleInterface->idle(handle)) {
+      if (mUIIdleInterface->idle(handle)) {
          if (mUIShowInterface && mUIShowInterface->hide)
             mUIShowInterface->hide(handle);
          if (mDialog)
             mDialog->Close();
-         return;
       }
    }
+}
+
+void LV2Editor::OnIdle(wxIdleEvent &evt)
+{
+   evt.Skip();
+   if (!mUI.mSuilInstance)
+      return;
 
    auto &portUIStates = mPortUIStates;
-
-   if (auto &atomState = portUIStates.mControlOut) {
-      atomState->SendToDialog([&](const LV2_Atom *atom, uint32_t size){
-         suil_instance_port_event(mUI.mSuilInstance.get(),
-            atomState->mpPort->mIndex, size,
-            // Means this event sends some structured data:
-            LV2Symbols::urid_EventTransfer, atom);
-      });
-   }
 
    // Is this idle time polling for changes of input redundant with
    // TransferDataToWindow or is it really needed?  Probably harmless.
