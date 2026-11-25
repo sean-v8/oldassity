@@ -29,6 +29,8 @@
 
 #include "ShuttleGui.h"
 
+#include <string_view>
+
 #include <wx/button.h>
 #include <wx/checkbox.h>
 #include <wx/choice.h>
@@ -259,9 +261,14 @@ bool LV2Editor::BuildFancy(
    const auto uinode = lilv_ui_get_uri(ui);
    lilv_world_load_resource(gWorld, uinode);
    LV2UIFeaturesList::UIHandler &handler = *this;
-   auto &instance = wrapper.GetInstance();
+   const std::string_view pluginUri{
+      lilv_node_as_uri(lilv_plugin_get_uri(&mPlug)) };
+   const bool isLsp = pluginUri.rfind("http://lsp-plug.in/plugins/lv2/", 0) == 0;
+   // LSP reads its graphs directly when an instance handle is available.
+   // This wrapper is never run, so let LSP use the LV2 message ports.
+   auto *instance = isLsp ? nullptr : &wrapper.GetInstance();
    auto &features = mUIFeatures.emplace(
-      wrapper.GetFeatures(), &handler, uinode, &instance,
+      wrapper.GetFeatures(), &handler, uinode, instance,
       (uiType == node_ExternalUI) ? nullptr : mParent);
    if (!features.mOk)
       return false;
