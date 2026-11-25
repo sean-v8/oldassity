@@ -24,6 +24,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <complex>
 #include <vector>
 
 #include <wx/checkbox.h>
@@ -57,6 +58,8 @@ struct Band
    double gain;
 };
 
+constexpr double twoPi = 6.28318530717958647693;
+
 struct Biquad
 {
    void Configure(FilterType type, const Band& next, double sampleRate)
@@ -73,7 +76,6 @@ struct Biquad
          return;
       }
 
-      constexpr double twoPi = 6.28318530717958647693;
       const auto w = twoPi * band.hz / sampleRate;
       const auto c = std::cos(w);
       const auto s = std::sin(w);
@@ -124,6 +126,15 @@ struct Biquad
       a2 /= a0;
    }
 
+   double PowerAt(std::complex<double> z, std::complex<double> zSquared) const
+   {
+      if (!active)
+         return 1.0;
+
+      return std::norm(b0 + b1 * z + b2 * zSquared) /
+         std::norm(1.0 + a1 * z + a2 * zSquared);
+   }
+
    double Process(double input)
    {
       if (!active)
@@ -149,8 +160,7 @@ struct FilterState
    std::array<Biquad, 4> filters{};
 };
 
-size_t ProcessFilters(const EffectFourBandSettings& settings, FilterState& state,
-   const float* input, float* output, size_t length)
+void ConfigureFilters(const EffectFourBandSettings& settings, FilterState& state)
 {
    auto& filters = state.filters;
    filters[0].Configure(FilterType::LowShelf,
@@ -165,7 +175,44 @@ size_t ProcessFilters(const EffectFourBandSettings& settings, FilterState& state
    filters[3].Configure(FilterType::HighShelf,
       { settings.mTrebleHz, settings.mTrebleSlope,
         settings.mTrebleEnabled ? settings.mTreble : 0.0 }, state.sampleRate);
+}
 
+// Estimate relative power for pink noise using equally spaced log frequencies.
+// Fixed reference keeps the correction independent of track length and playback.
+double ReferenceLevel(const EffectFourBandSettings& settings)
+{
+   constexpr double referenceRate = 48000.0;
+   constexpr size_t count = 512;
+   static const auto frequencies = [] {
+      std::array<std::complex<double>, count> result{};
+      for (size_t i = 0; i < result.size(); ++i)
+      {
+         const auto hz = 20.0 * std::pow(1000.0, (i + 0.5) / count);
+         result[i] = std::polar(1.0, -twoPi * hz / referenceRate);
+      }
+      return result;
+   }();
+
+   FilterState state{ referenceRate };
+   ConfigureFilters(settings, state);
+
+   double total = 0.0;
+   for (const auto z : frequencies)
+   {
+      const auto zSquared = z * z;
+      double power = 1.0;
+      for (const auto& filter : state.filters)
+         power *= filter.PowerAt(z, zSquared);
+      total += power;
+   }
+   return 10.0 * std::log10(total / count);
+}
+
+size_t ProcessFilters(const EffectFourBandSettings& settings, FilterState& state,
+   const float* input, float* output, size_t length)
+{
+   ConfigureFilters(settings, state);
+   auto& filters = state.filters;
    const auto volume = DB_TO_LINEAR(settings.mGainEnabled ? settings.mGain : 0.0);
    for (size_t i = 0; i < length; ++i)
    {
@@ -240,7 +287,7 @@ struct EffectFourBand::Editor final : EffectEditor
 
    Editor(const EffectUIServices& services, EffectSettingsAccess& access)
       : EffectEditor{ services, access }, mSettings{ GetSettings(access.Get()) }
-   {}
+   { ResetLinkedReference(); }
 
    bool ValidateUI() override
    {
@@ -257,6 +304,7 @@ struct EffectFourBand::Editor final : EffectEditor
    bool UpdateUI() override
    {
       mSettings = GetSettings(mAccess.Get());
+      ResetLinkedReference();
       for (auto& control : mControls)
       {
          UpdateText(control);
@@ -348,8 +396,8 @@ struct EffectFourBand::Editor final : EffectEditor
       if (dialog.ShowModal() == wxID_OK)
       {
          mSettings = options;
-         if (ValidateUI())
-            Publish(EffectSettingChanged{});
+         LinkVolume();
+         Commit();
       }
    }
 
@@ -376,7 +424,15 @@ struct EffectFourBand::Editor final : EffectEditor
       S.EndMultiColumn();
 
       mLink = S.AddCheckBox(XXO("L&ink Volume control to Tone controls"), mSettings.mLink);
-      mLink->Bind(wxEVT_CHECKBOX, [this](wxCommandEvent&) { Commit(); });
+      mLink->Bind(wxEVT_CHECKBOX, [this](wxCommandEvent&) {
+         if (!mParent->Validate() || !mParent->TransferDataFromWindow())
+         {
+            mLink->SetValue(mSettings.mLink);
+            return;
+         }
+         ResetLinkedReference();
+         Commit();
+      });
       S.EndStatic();
    }
 
@@ -420,30 +476,29 @@ private:
             return;
          }
 
-         const auto oldGain = EffectiveGain(changed);
          mSettings.*changed.enabled = changed.power->IsDown();
-         LinkVolume(changed, oldGain);
+         if (changed.setting != &EffectFourBandSettings::mGain)
+            LinkVolume();
          Commit();
       });
 
       control.text->Bind(wxEVT_TEXT, [this, index](wxCommandEvent&) {
          auto& changed = mControls[index];
-         const auto oldGain = EffectiveGain(changed);
-         if (!EnableApply(mParent, mParent->TransferDataFromWindow()))
+         if (!EnableApply(mParent, mParent->Validate() &&
+            mParent->TransferDataFromWindow()))
             return;
 
          UpdateSlider(changed);
-         LinkVolume(changed, oldGain);
+         UpdateLinkedVolume(changed);
          Commit();
       });
 
       control.slider->Bind(wxEVT_SLIDER, [this, index](wxCommandEvent& event) {
          auto& changed = mControls[index];
-         const auto oldGain = EffectiveGain(changed);
          mSettings.*changed.setting = event.GetInt();
          UpdateText(changed);
-         if (mParent->Validate())
-            LinkVolume(changed, oldGain);
+         if (mParent->Validate() && mParent->TransferDataFromWindow())
+            UpdateLinkedVolume(changed);
          Commit();
       });
    }
@@ -467,19 +522,29 @@ private:
          control.power->PopUp();
    }
 
-   double EffectiveGain(const Control& control) const
+   void ResetLinkedReference()
    {
-      return mSettings.*control.enabled ? mSettings.*control.setting : 0.0;
+      mLinkedReference = mSettings.mGain + ReferenceLevel(mSettings);
    }
 
-   void LinkVolume(const Control& control, double oldGain)
+   void UpdateLinkedVolume(const Control& control)
    {
-      if (!mLink->GetValue() || control.setting == &EffectFourBandSettings::mGain)
+      if (control.setting == &EffectFourBandSettings::mGain)
+         ResetLinkedReference();
+      else
+         LinkVolume();
+   }
+
+   void LinkVolume()
+   {
+      if (!mLink->GetValue())
          return;
 
-      const auto estimate = [](double gain) { return gain > 0.0 ? gain / 2.0 : gain / 4.0; };
-      const auto change = estimate(EffectiveGain(control)) - estimate(oldGain);
-      mSettings.mGain = std::clamp(mSettings.mGain - change, Gain.min, Gain.max);
+      // Keep the reference independent of the displayed, rounded gain so
+      // bypassing and restoring a band cannot accumulate rounding or clipping.
+      const auto gain = mLinkedReference - ReferenceLevel(mSettings);
+      mSettings.mGain = std::clamp(std::round(gain * 10.0) / 10.0,
+         Gain.min, Gain.max);
       UpdateText(mControls.back());
       UpdateSlider(mControls.back());
    }
@@ -493,6 +558,7 @@ private:
 
    wxWeakRef<wxWindow> mParent;
    EffectFourBandSettings mSettings;
+   double mLinkedReference{};
    std::array<Control, 5> mControls;
    wxCheckBox* mLink{};
 };
