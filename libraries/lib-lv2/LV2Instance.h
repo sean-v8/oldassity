@@ -70,7 +70,6 @@ public:
    size_t RealtimeProcess(size_t group,  EffectSettings &settings,
       const float *const *inbuf, float *const *outbuf, size_t numSamples)
       override;
-   bool RealtimeProcessEnd(EffectSettings &settings) noexcept override;
 
 private:
    LV2InstanceFeaturesList mFeatures;
@@ -91,7 +90,6 @@ private:
 
    size_t mUserBlockSize{};
 
-   size_t mNumSamples{};
    bool mRolling{ true };
    bool mUseLatency{ false };
 };

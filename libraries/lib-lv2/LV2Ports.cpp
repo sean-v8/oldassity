@@ -109,12 +109,33 @@ void LV2AtomPortState::SendToDialog(
 
 void LV2AtomPortState::ReceiveFromInstance()
 {
-   if (!mpPort->mIsInput) {
-      const auto ring = mRing.get();
-      LV2_ATOM_SEQUENCE_FOREACH(
-         reinterpret_cast<LV2_Atom_Sequence *>(mBuffer.get()), ev
-      )
-         zix_ring_write(ring, &ev->body, ev->body.size + sizeof(LV2_Atom));
+   if (mpPort->mIsInput)
+      return;
+
+   const auto sequence = reinterpret_cast<const LV2_Atom_Sequence *>(mBuffer.get());
+   const auto size = sequence->atom.size;
+   if (sequence->atom.type != LV2Symbols::urid_Sequence ||
+       size < sizeof(sequence->body) ||
+       size > mpPort->mMinimumSize - sizeof(sequence->atom))
+      return;
+
+   const auto ring = mRing.get();
+   auto cursor = reinterpret_cast<const uint8_t *>(sequence + 1);
+   auto remaining = size - sizeof(sequence->body);
+   while (remaining >= sizeof(LV2_Atom_Event)) {
+      const auto event = reinterpret_cast<const LV2_Atom_Event *>(cursor);
+      if (event->body.size > remaining - sizeof(*event))
+         break;
+
+      const auto eventSize = sizeof(*event) +
+         lv2_atom_pad_size(event->body.size);
+      if (eventSize > remaining)
+         break;
+
+      // The ring drops a whole message if the UI has fallen behind.
+      zix_ring_write(ring, &event->body, sizeof(event->body) + event->body.size);
+      cursor += eventSize;
+      remaining -= eventSize;
    }
 }
 

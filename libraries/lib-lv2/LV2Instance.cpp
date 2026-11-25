@@ -203,7 +203,6 @@ bool LV2Instance::RealtimeResume()
 
 bool LV2Instance::RealtimeProcessStart(MessagePackage &)
 {
-   mNumSamples = 0;
    for (auto & state : mPortStates.mAtomPortStates)
       state->SendToInstance(mForge, mPositionFrame, mPositionSpeed);
    return true;
@@ -229,8 +228,6 @@ size_t LV2Instance::RealtimeProcess(size_t group, EffectSettings &,
          port->mIndex,
          const_cast<float*>(port->mIsInput ? inbuf[i++] : outbuf[o++]));
 
-   mNumSamples = std::max(numSamples, mNumSamples);
-
    if (mRolling)
       lilv_instance_run(instance, numSamples);
    else
@@ -241,8 +238,13 @@ size_t LV2Instance::RealtimeProcess(size_t group, EffectSettings &,
    // Background thread consumes responses from yet another worker thread
    slave->ConsumeResponses();
 
-   for (auto & state : mPortStates.mAtomPortStates)
+   // The realtime processors share these buffers. Queue each processor's
+   // output before resetting the buffers for the next one.
+   for (auto & state : mPortStates.mAtomPortStates) {
+      if (mRolling)
+         state->ReceiveFromInstance();
       state->ResetForInstanceOutput();
+   }
 
    if (group == 0)
       mPositionFrame += numSamples;
@@ -250,21 +252,4 @@ size_t LV2Instance::RealtimeProcess(size_t group, EffectSettings &,
    return numSamples;
 }
 
-bool LV2Instance::RealtimeProcessEnd(EffectSettings &) noexcept
-{
-return GuardedCall<bool>([&]{
-   // Nothing to do if we did process any samples
-   if (mNumSamples == 0)
-      return true;
-
-   // Why is this not also done on the destructive processing path?
-   // Because it is soon dimissing the modal dialog anyway.
-   for (auto & state : mPortStates.mAtomPortStates)
-      state->ReceiveFromInstance();
-
-   mNumSamples = 0;
-
-   return true;
-});
-}
 #endif
