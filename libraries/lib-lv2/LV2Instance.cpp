@@ -175,11 +175,7 @@ bool LV2Instance::RealtimeAddProcessor(EffectSettings &settings,
 
 bool LV2Instance::RealtimeSuspend()
 {
-   if (mMaster)
-      mMaster->Deactivate();
-   for (auto &pSlave : mSlaves)
-      pSlave->Deactivate();
-
+   // Keep plugin state alive while transport processing is suspended.
    mPositionSpeed = 0.0;
    mPositionFrame = 0;
    mRolling = false;
@@ -189,11 +185,6 @@ bool LV2Instance::RealtimeSuspend()
 
 bool LV2Instance::RealtimeResume()
 {
-   if (mMaster)
-      mMaster->Activate();
-   for (auto &pSlave : mSlaves)
-      pSlave->Activate();
-
    mPositionSpeed = 1.0;
    mPositionFrame = 0;
    mRolling = true;
