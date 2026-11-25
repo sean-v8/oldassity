@@ -45,7 +45,6 @@ hold information about one contributor to Audacity.
 #include "AllThemeResources.h"
 #include "Theme.h"
 
-#include "../images/AudacityLogoWithName.xpm"
 
 // Notice this is a "system include".  This is on purpose and only until
 // we convert over to CMake.  Once converted, the "RevisionIndent.h" file
@@ -310,7 +309,7 @@ AboutDialog *AboutDialog::ActiveIntance()
 
 AboutDialog::AboutDialog(wxWindow * parent)
    /* i18n-hint: information about the program */
-   :  wxDialogWrapper(parent, -1, XO("About %s").Format( ProgramName ),
+   :  wxDialogWrapper(parent, -1, XO("About %s").Format( Verbatim("Oldassity") ),
                wxDefaultPosition, wxDefaultSize,
                wxDEFAULT_DIALOG_STYLE | wxRESIZE_BORDER)
 {
@@ -364,13 +363,12 @@ void AboutDialog::PopulateAudacityPage( ShuttleGui & S )
    informationStr
       << wxT("<center>")
       << XO("<h3>")
-      << ProgramName
+      << Verbatim("Oldassity")
       << wxT(" ")
       << wxString(AUDACITY_VERSION_STRING)
       << wxT("</center></h3>")
       /* i18n-hint: The program's name substitutes for %s */
-      << XO("%s the free, open source, cross-platform software for recording and editing sounds.")
-            .Format(ProgramName)
+      << XO("A fork of Audacity 3.4.2 for recording and editing audio.")
 
       << wxT("<h3>")
       << XO("Credits")
@@ -446,33 +444,10 @@ void AboutDialog::PopulateAudacityPage( ShuttleGui & S )
       << wxT("</center>")
    ;
 
-   auto pPage = S.StartNotebookPage( ProgramName );
+   S.StartNotebookPage( Verbatim("Oldassity") );
    S.StartVerticalLay(1);
-   {
-      //v For now, change to AudacityLogoWithName via old-fashioned way, not Theme.
-      wxBitmap logo(AudacityLogoWithName_xpm); //v
-
-      //Setup to scale the logo larger and smaller as necessary
-      const float fScale = 1.0f;
-      wxImage RescaledImage(logo.ConvertToImage());
-      wxColour MainColour(
-         RescaledImage.GetRed(1,1),
-         RescaledImage.GetGreen(1,1),
-         RescaledImage.GetBlue(1,1));
-      pPage->SetBackgroundColour(MainColour);
-      // wxIMAGE_QUALITY_HIGH not supported by wxWidgets 2.6.1, or we would use it here.
-      RescaledImage.Rescale((int)(LOGOWITHNAME_WIDTH * fScale), (int)(LOGOWITHNAME_HEIGHT *fScale));
-      wxBitmap RescaledBitmap(RescaledImage);
-
-      icon =
-         safenew wxStaticBitmap(S.GetParent(), -1,
-         //*logo, //v
-         //v theTheme.Bitmap(bmpAudacityLogo), wxPoint(93, 10), wxSize(215, 190));
-         //v theTheme.Bitmap(bmpAudacityLogoWithName),
-         RescaledBitmap,
-         wxDefaultPosition,
-         wxSize((int)(LOGOWITHNAME_WIDTH*fScale), (int)(LOGOWITHNAME_HEIGHT*fScale)));
-   }
+   icon = safenew wxStaticBitmap(S.GetParent(), wxID_ANY,
+      theTheme.Bitmap(bmpAudacityLogo48x48));
    S.Prop(0).AddWindow( icon );
 
    HtmlWindow *html = safenew LinkingHtmlWindow(S.GetParent(), -1,

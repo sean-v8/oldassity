@@ -569,7 +569,7 @@ endif()
 if( CMAKE_SYSTEM_NAME MATCHES "Darwin|Windows" )
    set( AUDACITY_NAME "Audacity" )
 else()
-   set( AUDACITY_NAME "audacity" )
+   set( AUDACITY_NAME "oldassity" )
 endif()
 
 # Create short and full version strings
