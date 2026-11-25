@@ -72,6 +72,8 @@ public:
    void ConnectPorts(const LV2Ports &ports,
       LV2PortStates &portStates, const LV2EffectSettings &settings,
       EffectOutputs *pOutputs);
+   bool mLspUIConnected{ false };
+
    void Activate();
    void Deactivate();
    LilvInstance &GetInstance() const;

@@ -36,7 +36,17 @@ LV2Instance::LV2Instance(
    int userBlockSize;
    LV2Preferences::GetBufferSize(effect, userBlockSize);
    mUserBlockSize = std::max(1, userBlockSize);
-   lv2_atom_forge_init(&mForge, mFeatures.Base().URIDMapFeature());
+   auto *map = mFeatures.Base().URIDMapFeature();
+   lv2_atom_forge_init(&mForge, map);
+   if (!ports.mLspPluginURI.empty() && ports.mControlInIdx && ports.mControlOutIdx) {
+      auto &state = *mPortStates.mAtomPortStates[*ports.mControlInIdx];
+      state.mLspNotification = map->map(map->handle,
+         "http://lsp-plug.in/types/lv2/types#UINotification");
+      state.mLspConnect = map->map(map->handle,
+         (ports.mLspPluginURI + "/ui_connect").c_str());
+      state.mLspDisconnect = map->map(map->handle,
+         (ports.mLspPluginURI + "/ui_disconnect").c_str());
+   }
 }
 
 LV2Instance::~LV2Instance() = default;
@@ -226,7 +236,17 @@ size_t LV2Instance::RealtimeProcess(size_t group, EffectSettings &,
             state->SendToInstance(mForge, mPositionFrame, mPositionSpeed);
          mFirstRealtimeBlock = false;
       }
-      lilv_instance_run(instance, numSamples);
+      if (!mPorts.mLspPluginURI.empty() && mPorts.mControlInIdx) {
+         auto &state = *mPortStates.mAtomPortStates[*mPorts.mControlInIdx];
+         auto &sequence = *reinterpret_cast<LV2_Atom_Sequence *>(state.mBuffer.get());
+         const auto sizeBeforeNotification = sequence.atom.size;
+         state.AppendRealtimeUIConnection(sequence, slave->mLspUIConnected);
+         lilv_instance_run(instance, numSamples);
+         // The sequence is shared by all processors and blocks in this scope.
+         sequence.atom.size = sizeBeforeNotification;
+      }
+      else
+         lilv_instance_run(instance, numSamples);
    }
    else
       while (--i >= 0)

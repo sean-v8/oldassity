@@ -17,6 +17,7 @@
 
 #include <wx/log.h>
 #include <cmath>
+#include <cstring>
 
 void LV2AtomPortState::SendToInstance(
    LV2_Atom_Forge &forge, const int64_t frameTime, const float speed
@@ -73,6 +74,28 @@ void LV2AtomPortState::SendToInstance(
       // PRL:  I'm not sure why this must be done both before lilv_instance_run
       // and after, but that's the legacy
       ResetForInstanceOutput();
+}
+
+void LV2AtomPortState::AppendRealtimeUIConnection(
+   LV2_Atom_Sequence &sequence, bool &connectionSent)
+{
+   if (!mLspNotification)
+      return;
+
+   const auto connected = mLspUIConnected.load(std::memory_order_relaxed);
+   if (connected == connectionSent)
+      return;
+
+   struct {
+      LV2_Atom_Event header;
+      LV2_Atom_Object_Body body;
+   } event{
+      { {}, { sizeof(LV2_Atom_Object_Body), LV2Symbols::urid_Object } },
+      { connected ? mLspConnect : mLspDisconnect, mLspNotification }
+   };
+   if (lv2_atom_sequence_append_event(
+          &sequence, mpPort->mMinimumSize - sizeof(LV2_Atom), &event.header))
+      connectionSent = connected;
 }
 
 void LV2AtomPortState::ResetForInstanceOutput() {
@@ -145,6 +168,21 @@ void LV2AtomPortState::ReceiveFromInstance()
 void LV2AtomPortState::ReceiveFromDialog(
    const void *buffer, uint32_t buffer_size)
 {
+   // LSP sends these only when its editor connects or disconnects. Keep
+   // the subscription independent of the lifetime of the audio stream.
+   if (mLspNotification && buffer_size == sizeof(LV2_Atom_Object)) {
+      LV2_Atom_Object notification;
+      std::memcpy(&notification, buffer, sizeof(notification));
+      if ((notification.atom.type == LV2Symbols::urid_Object ||
+           notification.atom.type == LV2Symbols::urid_Blank) &&
+          notification.atom.size == sizeof(notification.body) &&
+          notification.body.otype == mLspNotification &&
+          (notification.body.id == mLspConnect || notification.body.id == mLspDisconnect)) {
+         mLspUIConnected.store(notification.body.id == mLspConnect,
+            std::memory_order_relaxed);
+         return;
+      }
+   }
    // Send event information blob from the UI to the processing thread
    zix_ring_write(mRing.get(), buffer, buffer_size);
 }
@@ -177,6 +215,11 @@ void LV2EffectOutputs::Assign(EffectOutputs &&src)
 LV2Ports::LV2Ports(const LilvPlugin &plug)
 {
    using namespace LV2Symbols;
+
+   const auto *uri = lilv_node_as_uri(lilv_plugin_get_uri(&plug));
+   constexpr char lspPrefix[] = "http://lsp-plug.in/";
+   if (uri && std::strncmp(uri, lspPrefix, sizeof(lspPrefix) - 1) == 0)
+      mLspPluginURI = uri;
 
    // Collect information in mAudioPorts, mControlPorts, mAtomPorts, mCVPorts
    // Retrieve the port ranges for all ports (some values may be NaN)

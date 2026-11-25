@@ -17,8 +17,10 @@
 
 #if USE_LV2
 
+#include <atomic>
 #include <functional>
 #include <optional>
+#include <string>
 #include <unordered_map>
 
 #include "LV2Utils.h"
@@ -103,6 +105,7 @@ struct LV2_API LV2AtomPortState final {
     In addition, reset the output Atom ports.
    */
    void SendToInstance(LV2_Atom_Forge &forge, int64_t frameTime, float speed);
+   void AppendRealtimeUIConnection(LV2_Atom_Sequence &sequence, bool &connectionSent);
    void ResetForInstanceOutput();
 
    //! Take responses from the instance and send cross-thread for the dialog
@@ -121,6 +124,13 @@ struct LV2_API LV2AtomPortState final {
    const LV2AtomPortPtr mpPort;
    const Lilv_ptr<ZixRing, zix_ring_free> mRing;
    const std::unique_ptr<uint8_t[]> mBuffer;
+
+   LV2_URID mLspNotification{};
+   LV2_URID mLspConnect{};
+   LV2_URID mLspDisconnect{};
+
+private:
+   std::atomic<bool> mLspUIConnected{ false };
 };
 using LV2AtomPortStatePtr = std::shared_ptr<LV2AtomPortState>;
 using LV2AtomPortStateArray = std::vector<LV2AtomPortStatePtr>;
@@ -275,6 +285,7 @@ public:
    LV2AtomPortArray mAtomPorts;
    std::optional<size_t> mControlInIdx{};
    std::optional<size_t> mControlOutIdx{};
+   std::string mLspPluginURI;
    unsigned mMidiIn{ 0 };
    unsigned mMidiOut{ 0 };
 
