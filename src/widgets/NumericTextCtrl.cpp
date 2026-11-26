@@ -12,6 +12,7 @@
 
 
 #include "NumericTextCtrl.h"
+#include "NumericConverterFormats.h"
 
 #include "SampleCount.h"
 #include "AllThemeResources.h"
@@ -311,6 +312,14 @@ void NumericTextCtrl::SetInvalidValue(double invalidValue)
       SetValue(invalidValue);
 }
 
+bool NumericTextCtrl::OmitFieldLabel(size_t index) const
+{
+   const auto &format = mFormatSymbol.Internal();
+   return mHideTrailingSamplesLabel && index + 1 == mFormatter->GetFields().size() &&
+      (format == wxT("samples") ||
+       mFormatSymbol == NumericConverterFormats::TimeAndSampleFormat());
+}
+
 wxSize NumericTextCtrl::ComputeSizing(bool update, wxCoord boxW, wxCoord boxH)
 {
    if (!mFormatter)
@@ -384,7 +393,10 @@ wxSize NumericTextCtrl::ComputeSizing(bool update, wxCoord boxW, wxCoord boxH)
       // Figure out the x-position of each field and label in the box
       for (int i = 0, fcnt = fields.size(); i < fcnt; ++i) {
          // Get the size of the label
-         dc.GetTextExtent(fields[i].label, &strW, &strH);
+         if (OmitFieldLabel(i))
+            strW = 0;
+         else
+            dc.GetTextExtent(fields[i].label, &strW, &strH);
 
          // Remember this field's x-position
          mFieldPositions[i].fieldX = x;
@@ -413,7 +425,10 @@ wxSize NumericTextCtrl::ComputeSizing(bool update, wxCoord boxW, wxCoord boxH)
       // Determine the maximum x-position (length) of the remaining fields
       for (int i = 0, fcnt = fields.size(); i < fcnt; ++i) {
          // Get the size of the label
-         dc.GetTextExtent(fields[i].label, &strW, &strH);
+         if (OmitFieldLabel(i))
+            strW = 0;
+         else
+            dc.GetTextExtent(fields[i].label, &strW, &strH);
 
          // Just bump to next field
          x += (boxW * fields[i].digits) + strW;
@@ -480,7 +495,8 @@ bool NumericTextCtrl::Layout()
    memDC.SetBrush( wxNullBrush );
 
    for(i = 0; i < fields.size(); i++)
-      memDC.DrawText(fields[i].label, mFieldPositions[i].labelX, labelTop);
+      if (!OmitFieldLabel(i))
+         memDC.DrawText(fields[i].label, mFieldPositions[i].labelX, labelTop);
 
    if (mMenuEnabled) {
       wxRect r(mWidth, 0, mButtonWidth - 1, mHeight - 1);

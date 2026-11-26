@@ -218,6 +218,7 @@ void SelectionBar::AddTime(
       this, id, NumericConverterType_TIME(), formatName, 0.0);
 
    pCtrl->UseCompactLabels();
+   pCtrl->HideTrailingSamplesLabel();
    pCtrl->SetDigitSize(16, 29);
    pCtrl->SetMenuExtension([this, id](wxMenu &menu) {
       const bool starts = mSelectionMode == SelectionMode::StartEnd ||
@@ -234,8 +235,8 @@ void SelectionBar::AddTime(
          }, item->GetId());
       };
       if (id == 0) {
-         add(XO("Start"), SelectionMode::StartEnd, starts);
-         add(XO("Length"), SelectionMode::LengthEnd, !starts);
+         add(XO("Start"), mStartMode, starts);
+         add(XO("Length"), mLengthMode, !starts);
       }
       else {
          const auto end = starts ? SelectionMode::StartEnd : SelectionMode::LengthEnd;
@@ -502,6 +503,10 @@ void SelectionBar::SelectionModeUpdated()
 void SelectionBar::SetSelectionMode(SelectionMode mode)
 {
    mSelectionMode = mode;
+   if (mode == SelectionMode::StartEnd || mode == SelectionMode::StartLength)
+      mStartMode = mode;
+   else
+      mLengthMode = mode;
 
    // Update names and WindowIds for the screen readers
    auto& modeName = ModeNames[static_cast<size_t>(mode)];

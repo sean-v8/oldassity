@@ -101,6 +101,8 @@ class AUDACITY_DLL_API SelectionBar final : public ToolBar {
    double mStart, mEnd, mLength, mCenter;
 
    SelectionMode mSelectionMode {};
+   SelectionMode mStartMode{SelectionMode::StartEnd};
+   SelectionMode mLengthMode{SelectionMode::LengthEnd};
    SelectionMode mLastSelectionMode {};
 
    std::array<NumericTextCtrl*, 2> mTimeControls {};

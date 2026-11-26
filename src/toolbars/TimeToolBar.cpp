@@ -343,6 +343,7 @@ void TimeToolBar::Populate()
    wxSize digitSize = mAudioTime->GetDigitSize();
    mDigitRatio = (float)digitSize.x / digitSize.y;
    mAudioTime->UseCompactLabels();
+   mAudioTime->HideTrailingSamplesLabel();
    mAudioTime->SetDigitSize(minDigitH * mDigitRatio, minDigitH);
 
    // During initialization, we need to bypass some resizing to prevent the "best size"

@@ -103,6 +103,7 @@ class AUDACITY_DLL_API NumericTextCtrl final
    wxSize GetDigitSize() { return wxSize(mDigitBoxW, mDigitBoxH); }
    void SetDigitSize(int width, int height);
    void UseCompactLabels() { mCompactLabels = true; }
+   void HideTrailingSamplesLabel() { mHideTrailingSamplesLabel = true; }
    void SetMenuExtension(std::function<void(wxMenu &)> extension)
    { mMenuExtension = std::move(extension); }
    void SetReadOnly(bool readOnly = true);
@@ -159,7 +160,9 @@ private:
    std::unique_ptr<wxBitmap> mBackgroundBitmap;
 
    std::unique_ptr<wxFont> mDigitFont, mLabelFont;
+   bool OmitFieldLabel(size_t index) const;
    bool mCompactLabels{};
+   bool mHideTrailingSamplesLabel{};
    std::function<void(wxMenu &)> mMenuExtension;
    int            mDigitBoxW;
    int            mDigitBoxH;
