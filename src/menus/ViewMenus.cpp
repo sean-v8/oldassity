@@ -8,8 +8,11 @@
 #include "../ProjectWindow.h"
 #include "../TrackInfo.h"
 #include "../TrackPanel.h"
+#include "../TrackPanelAx.h"
 #include "UndoManager.h"
 #include "ViewInfo.h"
+#include "WaveTrack.h"
+#include "../tracks/playabletrack/wavetrack/ui/WaveTrackControls.h"
 #include "../commands/CommandContext.h"
 #include "../commands/CommandManager.h"
 #include "../prefs/GUIPrefs.h"
@@ -283,6 +286,30 @@ void OnExpandAllTracks(const CommandContext &context)
    ProjectHistory::Get( project ).ModifyState(true);
 }
 
+void FinishTrackHeightChange(AudacityProject &project)
+{
+   ProjectHistory::Get(project).ModifyState(false);
+   auto &panel = TrackPanel::Get(project);
+   panel.MakeParentRedrawScrollbars();
+   panel.Refresh(false);
+}
+
+void OnCycleTrackHeight(const CommandContext &context)
+{
+   auto &project = context.project;
+   if (auto *track = dynamic_cast<WaveTrack *>(TrackFocus::Get(project).Get())) {
+      WaveTrackControls::CycleHeight(*track);
+      FinishTrackHeightChange(project);
+   }
+}
+
+void OnCycleAllTrackHeights(const CommandContext &context)
+{
+   auto &project = context.project;
+   if (WaveTrackControls::CycleAllHeights(TrackList::Get(project)))
+      FinishTrackHeightChange(project);
+}
+
 void OnGoSelStart(const CommandContext &context)
 {
    auto &project = context.project;
@@ -435,7 +462,11 @@ BaseItemSharedPtr ViewMenu()
             Command( wxT("CollapseAllTracks"), XXO("&Collapse All Tracks"),
                FN(OnCollapseAllTracks), TracksExistFlag(), wxT("Ctrl+Shift+C") ),
             Command( wxT("ExpandAllTracks"), XXO("E&xpand Collapsed Tracks"),
-               FN(OnExpandAllTracks), TracksExistFlag(), wxT("Ctrl+Shift+X") )
+               FN(OnExpandAllTracks), TracksExistFlag(), wxT("Ctrl+Shift+X") ),
+            Command( wxT("CycleTrackHeight"), XXO("Cycle Focused Track Height"),
+               FN(OnCycleTrackHeight), WaveTracksExistFlag() ),
+            Command( wxT("CycleAllTrackHeights"), XXO("Cycle All Audio Track Heights"),
+               FN(OnCycleAllTrackHeights), WaveTracksExistFlag() )
          ),
 
          Menu( wxT("SkipTo"), XXO("Sk&ip to"),

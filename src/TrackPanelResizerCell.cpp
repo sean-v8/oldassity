@@ -24,8 +24,9 @@ Paul Licameli split from TrackPanel.cpp
 #include <wx/dc.h>
 #include <wx/mousestate.h>
 
-TrackPanelResizerCell::TrackPanelResizerCell(Channel &channel)
+TrackPanelResizerCell::TrackPanelResizerCell(Channel &channel, bool topEdge)
    : CommonTrackCell{ channel.GetChannelGroup(), channel.GetChannelIndex() }
+   , mTopEdge{ topEdge }
 {}
 
 std::vector<UIHandlePtr> TrackPanelResizerCell::HitTest
@@ -33,10 +34,9 @@ std::vector<UIHandlePtr> TrackPanelResizerCell::HitTest
 {
    (void)pProject;// Compiler food
    std::vector<UIHandlePtr> results;
-   auto pTrack = FindTrack();
-   if (pTrack) {
+   if (auto channel = FindChannel()) {
       auto result = std::make_shared<TrackPanelResizeHandle>(
-         pTrack->GetChannel(0), st.state.m_y );
+         channel, st.state.m_y, mTopEdge );
       result = AssignUIHandlePtr(mResizeHandle, result);
       results.push_back(result);
    }
@@ -53,7 +53,7 @@ void TrackPanelResizerCell::Draw(
          auto dc = &context.dc;
          const bool last =
             pTrack.get() == *TrackList::Channels( pTrack.get() ).rbegin();
-         if ( last ) {
+         if ( mTopEdge || last ) {
             // Fill in separator area below a track
             AColor::TrackPanelBackground( dc, false );
             dc->DrawRectangle( rect );

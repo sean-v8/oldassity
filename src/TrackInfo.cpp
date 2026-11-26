@@ -559,6 +559,15 @@ void TrackInfo::SetTrackInfoFont(wxDC * dc)
 
 //#define USE_BEVELS
 
+int TrackInfo::TrackHeightForItem(const TCPLines &topLines, unsigned item)
+{
+   const auto [y, height] = CalcItemY(topLines, item);
+   const auto bottom = CalcBottomItemY(
+      commonTrackTCPBottomLines, TCPLine::kHighestBottomItem, 0).first;
+   // HideTopItem requires a one-pixel gap above the bottom controls.
+   return kVerticalPadding + y + height - bottom + 1;
+}
+
 unsigned TrackInfo::DefaultTrackHeight( const TCPLines &topLines )
 {
    int needed =

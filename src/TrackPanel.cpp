@@ -1608,19 +1608,20 @@ struct ResizingChannelGroup final : TrackPanelGroup {
     @pre `pTrack->IsLeader()`
     */
    ResizingChannelGroup(
-      const std::shared_ptr<Track> &pTrack, wxCoord leftOffset)
-         : mpTrack{ pTrack }, mLeftOffset{ leftOffset } {}
+      const std::shared_ptr<Track> &pTrack, wxCoord leftOffset, wxCoord height)
+         : mpTrack{ pTrack }, mLeftOffset{ leftOffset }, mHeight{ height } {}
    Subdivision Children(const wxRect &rect) override
    { return { Axis::Y, Refinement{
       { rect.GetTop(),
          std::make_shared<LabeledChannelGroup>(mpTrack, mLeftOffset) },
-      { rect.GetTop() + rect.GetHeight() - kTrackSeparatorThickness,
+      { rect.GetTop() + mHeight - kTrackSeparatorThickness,
          TrackPanelResizerCell::Get(
             **mpTrack->Channels().rbegin()).shared_from_this()
       }
    } }; }
    const std::shared_ptr<Track> mpTrack;
    wxCoord mLeftOffset;
+   wxCoord mHeight;
 };
 
 // Stacks a dead area at top, the tracks, and the click-to-deselect area below
@@ -1633,11 +1634,22 @@ struct Subgroup final : TrackPanelGroup {
       Refinement refinement;
 
       auto &tracks = *mPanel.GetTracks();
-      if (!tracks.empty())
-         refinement.emplace_back( yy, EmptyCell::Instance() ),
+      if (!tracks.empty()) {
+         refinement.emplace_back(yy, EmptyCell::Instance());
          yy += kTopMargin;
+      }
+
+      // Keep a separate strip at the bottom edge for resizing the track above.
+      constexpr wxCoord topResizeThickness = 4;
+      static_assert(topResizeThickness < kTopMargin);
 
       for (const auto leader : tracks) {
+         if (dynamic_cast<WaveTrack *>(leader)) {
+            // The top-inset part of the separator belongs to the track below.
+            // Its position stays put when that track changes height.
+            refinement.emplace_back(yy - topResizeThickness,
+               std::make_shared<TrackPanelResizerCell>(**leader->Channels().rbegin(), true));
+         }
          wxCoord height = 0;
          for (auto pChannel : leader->Channels()) {
             auto &view = ChannelView::Get(*pChannel);
@@ -1645,7 +1657,7 @@ struct Subgroup final : TrackPanelGroup {
          }
          refinement.emplace_back( yy,
             std::make_shared<ResizingChannelGroup>(
-               leader->SharedPointer(), viewInfo.GetLeftOffset())
+               leader->SharedPointer(), viewInfo.GetLeftOffset(), height)
          );
          yy += height;
       }

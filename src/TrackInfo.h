@@ -73,6 +73,8 @@ namespace TrackInfo
    AUDACITY_DLL_API
    unsigned DefaultTrackHeight( const TCPLines &topLines );
 
+   int TrackHeightForItem(const TCPLines &topLines, unsigned item);
+
    AUDACITY_DLL_API
    void DrawItems
       ( TrackPanelDrawingContext &context,

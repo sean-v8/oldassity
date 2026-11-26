@@ -17,6 +17,8 @@ Paul Licameli split from TrackPanel.cpp
 #include "WaveChannelView.h"
 #include "WaveChannelViewConstants.h"
 #include "AudioIOBase.h"
+#include <array>
+
 #include "../../../../CellularPanel.h"
 #include "Project.h"
 #include "ProjectAudioIO.h"
@@ -1103,6 +1105,80 @@ void WaveTrackControls::GetPanRect(const wxPoint &topleft, wxRect & dest)
    GetGainRect( topleft, dest );
    auto results = CalcItemY( waveTrackTCPLines, TCPLine::kItemPan );
    dest.y = topleft.y + results.first;
+}
+
+namespace {
+std::array<int, 4> TrackHeightPresets()
+{
+   const int pan = TrackInfo::TrackHeightForItem(waveTrackTCPLines, TCPLine::kItemPan);
+   return {
+      TrackInfo::TrackHeightForItem(waveTrackTCPLines, TCPLine::kItemEffects),
+      TrackInfo::TrackHeightForItem(waveTrackTCPLines, TCPLine::kItemGain),
+      pan, 2 * pan
+   };
+}
+
+int CurrentWaveTrackHeight(const WaveTrack &track)
+{
+   return track.Channels().sum([](const auto &channel) {
+      return ChannelView::Get(*channel).GetHeight();
+   });
+}
+
+int NextTrackHeight(int current)
+{
+   const auto heights = TrackHeightPresets();
+   const auto preset = std::find(heights.begin(), heights.end(), current);
+   return preset == heights.end() || preset == heights.end() - 1
+      ? heights.front() : *std::next(preset);
+}
+
+void ApplyTrackHeight(WaveTrack &track, int height)
+{
+   const auto channels = track.Channels();
+   int minimum = 0;
+   int extra = 0;
+   for (const auto &channel : channels) {
+      const auto &view = ChannelView::Get(*channel);
+      minimum += view.GetMinimizedHeight();
+      extra += std::max(0, view.GetHeight() - view.GetMinimizedHeight());
+   }
+
+   const int available = std::max(0, height - minimum);
+   const int divisor = extra ? extra : static_cast<int>(channels.size());
+   int weight = 0;
+   int allocated = 0;
+   for (const auto &channel : channels) {
+      auto &view = ChannelView::Get(*channel);
+      const int channelMinimum = view.GetMinimizedHeight();
+      weight += extra ? std::max(0, view.GetHeight() - channelMinimum) : 1;
+      const int next = static_cast<long long>(available) * weight / divisor;
+      view.SetExpandedHeight(channelMinimum + next - allocated);
+      view.SetMinimized(false);
+      allocated = next;
+   }
+}
+}
+
+void WaveTrackControls::CycleHeight(WaveTrack &track)
+{
+   ApplyTrackHeight(track, NextTrackHeight(CurrentWaveTrackHeight(track)));
+}
+
+bool WaveTrackControls::CycleAllHeights(TrackList &tracks)
+{
+   const auto waveTracks = tracks.Any<WaveTrack>();
+   if (waveTracks.empty())
+      return false;
+   const int firstHeight = CurrentWaveTrackHeight(**waveTracks.begin());
+   const bool uniform = std::all_of(waveTracks.begin(), waveTracks.end(),
+      [firstHeight](const WaveTrack *track) {
+         return CurrentWaveTrackHeight(*track) == firstHeight;
+      });
+   const int next = NextTrackHeight(uniform ? firstHeight : 0);
+   for (auto *track : waveTracks)
+      ApplyTrackHeight(*track, next);
+   return true;
 }
 
 unsigned WaveTrackControls::DefaultWaveTrackHeight()

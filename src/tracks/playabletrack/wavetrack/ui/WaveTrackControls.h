@@ -21,6 +21,7 @@ class SoloButtonHandle;
 class EffectsButtonHandle;
 class GainSliderHandle;
 class PanSliderHandle;
+class TrackList;
 class WaveTrack;
 class wxEvent;
 class wxWindow;
@@ -45,6 +46,8 @@ public:
    const TCPLines& GetTCPLines() const override;
 
    static unsigned DefaultWaveTrackHeight();
+   static void CycleHeight(WaveTrack &track);
+   static bool CycleAllHeights(TrackList &tracks);
    static void GetGainRect(const wxPoint & topLeft, wxRect &dest);
    static void GetPanRect(const wxPoint & topLeft, wxRect &dest);
 

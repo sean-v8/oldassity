@@ -25,7 +25,7 @@ public:
    /*!
     @pre `pChannel != nullptr`
     */
-   TrackPanelResizeHandle(const std::shared_ptr<Channel> &pChannel, int y);
+   TrackPanelResizeHandle(const std::shared_ptr<Channel> &pChannel, int y, bool topEdge = false);
 
    TrackPanelResizeHandle &operator=(const TrackPanelResizeHandle&) = default;
 
@@ -72,6 +72,7 @@ private:
    int mInitialUpperExpandedHeight{};
 
    int mMouseClickY{};
+   bool mTopEdge{};
 };
 
 #endif

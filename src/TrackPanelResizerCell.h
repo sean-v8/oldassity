@@ -31,7 +31,7 @@ public:
    /*!
     @pre `dynamic_cast<Track*>(&channel.GetChannelGroup()) != nullptr`
     */
-   explicit TrackPanelResizerCell(Channel &channel);
+   explicit TrackPanelResizerCell(Channel &channel, bool topEdge = false);
 
    std::vector<UIHandlePtr> HitTest
       (const TrackPanelMouseState &, const AudacityProject *) override;
@@ -43,6 +43,7 @@ private:
       TrackPanelDrawingContext &context,
       const wxRect &rect, unsigned iPass ) override;
 
+   const bool mTopEdge;
    std::weak_ptr<TrackPanelResizeHandle> mResizeHandle;
 };
 

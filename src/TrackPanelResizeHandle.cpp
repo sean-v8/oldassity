@@ -19,7 +19,10 @@ Paul Licameli split from TrackPanel.cpp
 #include "ProjectHistory.h"
 #include "RefreshCode.h"
 #include "Track.h"
+#include "WaveTrack.h"
+#include "tracks/playabletrack/wavetrack/ui/WaveTrackControls.h"
 #include "TrackPanelMouseEvent.h"
+#include "TrackPanelAx.h"
 #include "tracks/ui/ChannelView.h"
 
 HitTestPreview TrackPanelResizeHandle::HitPreview(bool bLinked)
@@ -57,6 +60,18 @@ UIHandle::Result TrackPanelResizeHandle::Click(
    const TrackPanelMouseEvent &evt, AudacityProject *pProject )
 {
    using namespace RefreshCode;
+   if (mTopEdge && (evt.event.LeftDown() || evt.event.LeftDClick())) {
+      auto channel = FindChannel();
+      if (!channel)
+         return Cancelled;
+      auto &track = static_cast<WaveTrack &>(GetTrack(*channel));
+      TrackFocus::Get(*pProject).Set(&track);
+      if (evt.event.LeftDClick()) {
+         WaveTrackControls::CycleHeight(track);
+         ProjectHistory::Get(*pProject).ModifyState(false);
+         return Cancelled | RefreshAll | FixScrollbars;
+      }
+   }
    if (evt.event.LeftDClick() && mMode == IsResizingBetweenLinkedTracks) {
       auto &tracks = TrackList::Get(*pProject);
       auto theChannel = FindChannel();
@@ -84,9 +99,10 @@ UIHandle::Result TrackPanelResizeHandle::Click(
 }
 
 TrackPanelResizeHandle::TrackPanelResizeHandle(
-   const std::shared_ptr<Channel> &pChannel, int y
+   const std::shared_ptr<Channel> &pChannel, int y, bool topEdge
 )  : mwChannel{ pChannel }
    , mMouseClickY( y )
+   , mTopEdge( topEdge )
 {
    // TODO: more-than-two-channels
 
@@ -260,6 +276,11 @@ UIHandle::Result TrackPanelResizeHandle::Drag
 HitTestPreview TrackPanelResizeHandle::Preview
 (const TrackPanelMouseState &, AudacityProject *)
 {
+   if (mTopEdge) {
+      auto preview = HitPreview(false);
+      preview.message = XO("Drag to resize this track, or double-click to cycle its height.");
+      return preview;
+   }
    return HitPreview(mMode == IsResizingBetweenLinkedTracks);
 }
 
