@@ -820,7 +820,8 @@ void ToolManager::ReadConfig()
          // Set the width and height
          if( width[ ndx ] != -1 && height[ ndx ] != -1 )
          {
-            wxSize sz( width[ ndx ], height[ ndx ] );
+            wxSize sz( width[ ndx ],
+               std::max(height[ ndx ], bar->GetMinToolbarHeight()) );
             bar->SetSize( sz );
             bar->ResizingDone();
          }
@@ -852,10 +853,11 @@ void ToolManager::ReadConfig()
          wxASSERT(mParent);
          ToolFrame *f = safenew ToolFrame( mParent, this, bar, wxPoint( x, y ) );
 
+         const auto minHeight = bar->GetMinToolbarHeight() + 2 * ToolBarFloatMargin;
          // Set the width and height
          if( width[ ndx ] != -1 && height[ ndx ] != -1 )
          {
-            wxSize sz( width[ ndx ], height[ ndx ] );
+            wxSize sz( width[ ndx ], std::max(height[ ndx ], minHeight) );
             f->SetSizeHints( sz );
             f->SetSize( sz );
             f->Layout();
@@ -864,7 +866,7 @@ void ToolManager::ReadConfig()
          }
 
          // Required on Linux Xfce
-         wxSize msz(width[ndx],height[ndx]-1);
+         wxSize msz(width[ndx], std::max(height[ndx] - 1, minHeight));
          bar->GetParent()->SetMinSize(msz);
 
          // Inform toolbar of change

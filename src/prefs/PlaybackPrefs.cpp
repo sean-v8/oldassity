@@ -148,8 +148,6 @@ void PlaybackPrefs::PopulateOrExchange(ShuttleGui & S)
       {
          //Removing Vari-Speed Play from PlaybackPrefs
          //S.TieCheckBox(XXO("&Vari-Speed Play"), {"/AudioIO/VariSpeedPlay", true});
-         S.TieCheckBox(XXO("Use a worker thread for Mix and Render to New Track"),
-            {"/AudioIO/MixRenderWorker", false});
          S.TieCheckBox(XXO("&Micro-fades"), {"/AudioIO/Microfades", false});
          S.TieCheckBox(XXO("Always scrub un&pinned"),
             {UnpinnedScrubbingPreferenceKey(),

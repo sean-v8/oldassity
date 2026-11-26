@@ -44,9 +44,9 @@
 #include "Prefs.h"
 #include "Internat.h"
 
-std::atomic<DitherType> gLowQualityDither{DitherType::none};
-std::atomic<DitherType> gHighQualityDither{DitherType::shaped};
-static thread_local Dither gDitherAlgorithm;
+DitherType gLowQualityDither = DitherType::none;
+DitherType gHighQualityDither = DitherType::shaped;
+static Dither gDitherAlgorithm;
 
 void InitDitherers()
 {

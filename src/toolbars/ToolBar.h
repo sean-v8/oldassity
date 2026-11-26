@@ -142,6 +142,7 @@ public:
    /// Resizable toolbars should implement these.
    // NEW virtuals:
    virtual int GetInitialWidth() { return -1; }
+   virtual int GetMinToolbarHeight() { return toolbarSingle; }
    virtual int GetMinToolbarWidth() { return GetInitialWidth(); }
    virtual wxSize GetDockedSize() { return GetMinSize(); }
    

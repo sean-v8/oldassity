@@ -590,11 +590,9 @@ void ToolBar::ReCreateButtons()
    // Set the true AND minimum sizes and do final layout
    if(IsResizable())
    {
-      // JKC we're going to allow all resizable toolbars to be resized
-      // to 1 unit high, typically 27 pixels.
       wxSize sz2 = sz;
       sz2.SetWidth(GetMinToolbarWidth());
-      sz2.y = tbs -1;
+      sz2.SetHeight(GetMinToolbarHeight());
       SetMinSize(sz2);
       
       // sz2 is now the minimum size.

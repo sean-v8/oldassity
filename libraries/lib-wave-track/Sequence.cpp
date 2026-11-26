@@ -200,7 +200,7 @@ bool Sequence::ConvertToSampleFormat(sampleFormat format,
             // as the old effective (though format might be narrower than the
             // old stored).
             format < oldFormats.Effective()
-               ? gHighQualityDither.load()
+               ? gHighQualityDither
                : DitherType::none );
 
          // Note this fix for http://bugzilla.audacityteam.org/show_bug.cgi?id=451,
@@ -1114,30 +1114,9 @@ bool Sequence::Read(samplePtr buffer, sampleFormat format,
    return true;
 }
 
-namespace {
-thread_local const Sequence::ReadDispatcher *readDispatcher{};
-}
-
-Sequence::ScopedReadDispatcher::ScopedReadDispatcher(
-   const ReadDispatcher &dispatcher)
-   : mPrevious{readDispatcher}
-{
-   readDispatcher = &dispatcher;
-}
-
-Sequence::ScopedReadDispatcher::~ScopedReadDispatcher()
-{
-   readDispatcher = mPrevious;
-}
-
 AudioSegmentSampleView Sequence::GetFloatSampleView(
    sampleCount start, size_t length, bool mayThrow) const
 {
-   if (readDispatcher) {
-      std::optional<AudioSegmentSampleView> result;
-      (*readDispatcher)([&] { result.emplace(GetFloatSampleView(start, length, mayThrow)); });
-      return std::move(*result);
-   }
    assert(start < mNumSamples);
    length = limitSampleBufferSize(length, mNumSamples - start);
    std::vector<BlockSampleView> blockViews;
@@ -1158,11 +1137,6 @@ AudioSegmentSampleView Sequence::GetFloatSampleView(
 bool Sequence::Get(samplePtr buffer, sampleFormat format,
    sampleCount start, size_t len, bool mayThrow) const
 {
-   if (readDispatcher) {
-      bool result{};
-      (*readDispatcher)([&] { result = Get(buffer, format, start, len, mayThrow); });
-      return result;
-   }
    if (start == mNumSamples) {
       return len == 0;
    }
@@ -1267,7 +1241,7 @@ void Sequence::SetSamples(constSamplePtr buffer, sampleFormat format,
          // Note: we ensured temp can hold fileLength.  blen is not more
          CopySamples(buffer, format, temp.ptr(), dstFormat, blen,
             (dstFormat < effectiveFormat
-               ? gHighQualityDither.load() : DitherType::none));
+               ? gHighQualityDither : DitherType::none));
          useBuffer = temp.ptr();
       }
 
@@ -1410,7 +1384,7 @@ bool Sequence::Append(
          mAppendBuffer.ptr() + mAppendBufferLen * SAMPLE_SIZE(seqFormat),
          seqFormat,
          toCopy,
-         (seqFormat < effectiveFormat ? gHighQualityDither.load() : DitherType::none),
+         (seqFormat < effectiveFormat ? gHighQualityDither : DitherType::none),
          stride);
       mAppendEffectiveFormat =
          std::max(mAppendEffectiveFormat, effectiveFormat);

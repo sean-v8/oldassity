@@ -52,22 +52,6 @@ using BlockPtrArray = std::vector<SeqBlock*>; // non-owning pointers
 
 class WAVE_TRACK_API Sequence final : public XMLTagHandler{
  public:
-   // A worker may mix detached tracks while asking their owner thread to
-   // read project samples. The dispatcher must complete each read before
-   // returning and propagate its exception to the requesting thread.
-   using ReadDispatcher = std::function<void(std::function<void()>)>;
-   class WAVE_TRACK_API ScopedReadDispatcher
-   {
-   public:
-      explicit ScopedReadDispatcher(const ReadDispatcher &dispatcher);
-      ~ScopedReadDispatcher();
-      ScopedReadDispatcher(const ScopedReadDispatcher &) = delete;
-      ScopedReadDispatcher &operator=(const ScopedReadDispatcher &) = delete;
-
-   private:
-      const ReadDispatcher *mPrevious;
-   };
-
 
    //
    // Static methods

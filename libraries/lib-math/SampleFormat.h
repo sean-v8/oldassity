@@ -12,7 +12,6 @@
 #define __AUDACITY_SAMPLE_FORMAT__
 
 #include "MemoryX.h"
-#include <atomic>
 #include <cstdlib>
 
 //
@@ -21,7 +20,7 @@
 
 enum DitherType : unsigned;
 //! These global variables are assigned at application startup or after change of preferences.
-extern MATH_API std::atomic<DitherType> gLowQualityDither, gHighQualityDither;
+extern MATH_API DitherType gLowQualityDither, gHighQualityDither;
 
 // ----------------------------------------------------------------------------
 // Supported sample formats

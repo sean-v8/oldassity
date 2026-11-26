@@ -7,11 +7,11 @@
 #include "ProjectHistory.h"
 #include "ProjectRate.h"
 #include "QualitySettings.h"
-#include "Sequence.h"
 #include "TimeTrack.h"
 #include "ToolManager.h"
 #include "ToolDock.h"
 #include "Track.h"
+#include "UndoManager.h"
 #include "WaveTrack.h"
 #include "XMLWriter.h"
 
@@ -19,15 +19,12 @@
 #include "../ProjectWindow.h"
 
 #include <algorithm>
-#include <atomic>
 #include <chrono>
-#include <condition_variable>
-#include <exception>
 #include <cmath>
 #include <limits>
-#include <mutex>
-#include <thread>
 #include <wx/button.h>
+#include <wx/choicdlg.h>
+#include <wx/sizer.h>
 #include <wx/evtloop.h>
 #include <wx/eventfilter.h>
 #include <wx/utils.h>
@@ -41,7 +38,6 @@ constexpr int nextSliceMs = 1;
 constexpr int blockedPollMs = 100;
 constexpr int progressRange = 10000;
 constexpr size_t samplesPerStep = 16384;
-constexpr size_t workerSamplesPerStep = 65536;
 
 wxString FormatTime(long long seconds)
 {
@@ -76,81 +72,6 @@ wxString SourceState(const Track &track)
    return std::move(state.text);
 }
 
-const wxEventTypeTag<wxThreadEvent> workerReady{ wxNewEventType() };
-
-// Exactly one request can be in flight. Its captures can refer to the worker
-// stack because Dispatch waits until the UI has finished using them.
-class RenderWorker
-{
-public:
-   ~RenderWorker()
-   {
-      {
-         std::lock_guard lock{mutex};
-         stopping = true;
-      }
-      condition.notify_one();
-      if (thread.joinable())
-         thread.join();
-   }
-
-   void Start(MixRenderJob &job, wxEvtHandler &owner)
-   {
-      thread = std::thread([this, &job, &owner] {
-         const Sequence::ReadDispatcher dispatch = [&](auto action) {
-            std::unique_lock lock{mutex};
-            if (stopping)
-               throw Stopped{};
-            auto event = std::make_unique<wxThreadEvent>(workerReady);
-            requestError = {};
-            request = std::move(action);
-            wxQueueEvent(&owner, event.release());
-            condition.wait(lock, [&] { return stopping || !request; });
-            if (stopping)
-               throw Stopped{};
-            if (requestError)
-               std::rethrow_exception(requestError);
-         };
-
-         try {
-            const Sequence::ScopedReadDispatcher reads{dispatch};
-            while (job.ProcessNext(workerSamplesPerStep, dispatch))
-               elapsed.store(job.Elapsed());
-         }
-         catch (const Stopped &) {}
-         catch (...) { failure = std::current_exception(); }
-         done.store(true);
-      });
-   }
-
-   void ServiceRequest()
-   {
-      std::unique_lock lock{mutex};
-      if (!request)
-         return;
-      // The worker is waiting on the condition variable. Keep the request
-      // alive until the callable and all its borrowed buffers are finished.
-      try { request(); }
-      catch (...) { requestError = std::current_exception(); }
-      request = {};
-      lock.unlock();
-      condition.notify_one();
-   }
-
-   std::atomic<double> elapsed{};
-   std::atomic<bool> done{};
-   std::exception_ptr failure; // Published by done.
-
-private:
-   struct Stopped {};
-   std::mutex mutex;
-   std::condition_variable condition;
-   std::function<void()> request;
-   std::exception_ptr requestError;
-   bool stopping{};
-   std::thread thread;
-};
-
 }
 
 struct OperationsToolBar::Render {
@@ -173,7 +94,8 @@ struct OperationsToolBar::Render {
    Clock::time_point started{};
    Clock::time_point finished{};
    bool complete{};
-   std::unique_ptr<RenderWorker> worker; // Destroy and join before the job.
+   bool validateSources{true};
+   TranslatableString label;
 };
 
 struct OperationsToolBar::EffectProgress final
@@ -272,9 +194,17 @@ OperationsToolBar::OperationsToolBar(AudacityProject &project)
    : ToolBar(project, XO("Operations"), ID(), true)
 {
    Bind(wxEVT_TIMER, &OperationsToolBar::OnTimer, this, mTimer.GetId());
-   Bind(workerReady, [this](wxThreadEvent &) {
-      if (mRender && mRender->worker && CanServiceRender())
-         mRender->worker->ServiceRequest();
+   mUndoSubscription = UndoManager::Get(project).Subscribe([this](UndoRedoMessage event) {
+      if (mRender && (event.type == UndoRedoMessage::Pushed ||
+             event.type == UndoRedoMessage::Modified ||
+             event.type == UndoRedoMessage::UndoOrRedo ||
+             event.type == UndoRedoMessage::Reset))
+         mRender->validateSources = true;
+   });
+   mTrackSubscription = TrackList::Get(project).Subscribe([this](const TrackListEvent &event) {
+      if (mRender && (event.mType == TrackListEvent::TRACK_DATA_CHANGE ||
+             event.mType == TrackListEvent::DELETION || event.mType == TrackListEvent::ADDITION))
+         mRender->validateSources = true;
    });
 }
 
@@ -308,16 +238,27 @@ void OperationsToolBar::Populate()
          mEffectProgress->result = BasicUI::ProgressResult::Stopped;
    });
 
-   Add(mStatus, 2, wxALIGN_CENTER_VERTICAL | wxRIGHT, 4);
-   Add(mProgress, 1, wxALIGN_CENTER_VERTICAL | wxRIGHT, 4);
-   Add(mStop, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 4);
-   Add(mCancel, 0, wxALIGN_CENTER_VERTICAL);
+   mTime = safenew wxStaticText(this, wxID_ANY, wxString{});
+   mQueue = safenew wxButton(this, wxID_ANY, XO("Queue").Translation(),
+      wxDefaultPosition, wxSize(-1, toolbarSingle), wxBU_EXACTFIT);
+   mQueue->Bind(wxEVT_BUTTON, [this](wxCommandEvent &) { ShowRenderQueue(); });
+
+   auto *rows = safenew wxBoxSizer(wxVERTICAL);
+   rows->Add(mStatus, 1, wxEXPAND);
+   auto *controls = safenew wxBoxSizer(wxHORIZONTAL);
+   controls->Add(mTime, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 4);
+   controls->Add(mProgress, 1, wxALIGN_CENTER_VERTICAL | wxRIGHT, 4);
+   controls->Add(mQueue, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 4);
+   controls->Add(mStop, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 4);
+   controls->Add(mCancel, 0, wxALIGN_CENTER_VERTICAL);
+   rows->Add(controls, 0, wxEXPAND);
+   Add(rows, 1, wxEXPAND);
 
    mStatus->Bind(wxEVT_LEFT_DCLICK, [this](wxMouseEvent &) {
       if (auto *dock = GetDock()) {
          const auto width = dock->GetClientSize().x - GetPosition().x - 3;
          if (width >= GetMinToolbarWidth()) {
-            SetSize(width, toolbarSingle);
+            SetSize(width, GetMinToolbarHeight());
             Layout();
             Updated();
          }
@@ -326,11 +267,15 @@ void OperationsToolBar::Populate()
    UpdateDisplay();
 }
 
+wxSize OperationsToolBar::GetDockedSize()
+{
+   return {GetSize().x, GetMinToolbarHeight()};
+}
+
 int OperationsToolBar::GetMinToolbarWidth()
 {
    // Leave room for the grabber, resize grip and padding in the base toolbar.
-   return 160 + (mCancel ? mCancel->GetBestSize().x : 0) +
-      (mStop && mStop->IsShown() ? mStop->GetBestSize().x + 4 : 0);
+   return 220 + (mCancel ? mCancel->GetBestSize().x : 0);
 }
 
 void OperationsToolBar::EnableDisableButtons()
@@ -348,65 +293,100 @@ void OperationsToolBar::EnableDisableButtons()
       relayout = true;
    }
    mCancel->Enable(IsRunning());
+   mQueue->Enable(!mEffectProgress && (mRender || !mRenderQueue.empty()));
    if (relayout)
       Layout();
 }
 
 void OperationsToolBar::UpdateDisplay()
 {
+   TranslatableString label;
+   wxString timing;
+   int progress{};
    if (mEffectProgress) {
-      const auto &progress = *mEffectProgress;
-      auto label = progress.message.empty() ? progress.title : progress.message;
-      if (!(progress.flags & BasicUI::ProgressHideTime)) {
-         const auto elapsed = std::chrono::duration<double>(
-            Clock::now() - progress.started).count();
-         const auto elapsedText = FormatTime(static_cast<long long>(elapsed));
-         const auto remaining = progress.fraction > 0.0
-            ? std::ceil(elapsed * (1.0 - progress.fraction) / progress.fraction)
-            : std::numeric_limits<double>::infinity();
-         if (elapsed >= 0.5 && remaining <= std::numeric_limits<int>::max())
-            label = XO("%s · %s<%s").Format(label.Translation(), elapsedText,
-               FormatTime(static_cast<long long>(remaining)));
-         else
-            label = XO("%s · %s").Format(label.Translation(), elapsedText);
-      }
-      mStatus->SetLabel(label.Translation());
-      mStatus->SetToolTip(label.Translation());
-      mProgress->SetValue(static_cast<int>(progress.fraction * progressRange));
-      EnableDisableButtons();
-      return;
-   }
-   auto label = !mRender ? XO("No active operation") :
-      mRender->complete ? XO("Ready to add mix") : XO("Mix and Render");
-   wxString elapsedText;
-   if (mRender) {
-      const auto end = mRender->complete ? mRender->finished : Clock::now();
-      elapsedText = FormatTime(std::chrono::duration_cast<std::chrono::seconds>(
-         end - mRender->started).count());
-      label = XO("%s · %s").Format(label.Translation(), elapsedText);
-   }
-   if (mRender && !mRender->complete) {
-      const auto duration = mRender->job->Duration();
-      const auto elapsed = mRender->worker
-         ? mRender->worker->elapsed.load() : mRender->job->Elapsed();
-      const auto time = std::chrono::duration<double>(mRender->processingTime).count();
-      if (elapsed > 0 && duration > elapsed && time >= 0.5) {
-         const auto remaining = std::ceil(time * (duration - elapsed) / elapsed);
-         if (remaining >= 0 && remaining <= std::numeric_limits<int>::max()) {
-            const auto seconds = static_cast<int>(remaining);
-            label = XO("Mix and Render · %s<%s").Format(
-               elapsedText, FormatTime(seconds));
+      const auto &effect = *mEffectProgress;
+      label = effect.message.empty() ? effect.title : effect.message;
+      progress = static_cast<int>(effect.fraction * progressRange);
+      if (!(effect.flags & BasicUI::ProgressHideTime)) {
+         const auto elapsed = std::chrono::duration<double>(Clock::now() - effect.started).count();
+         timing = FormatTime(static_cast<long long>(elapsed));
+         if (elapsed >= 0.5 && effect.fraction > 0.0) {
+            const auto remaining = std::ceil(elapsed * (1.0 - effect.fraction) / effect.fraction);
+            if (remaining <= std::numeric_limits<int>::max())
+               timing += wxT("<") + FormatTime(static_cast<long long>(remaining));
          }
       }
    }
-   mStatus->SetLabel(label.Translation());
-   auto tooltip = XO("%s\nDouble-click to widen to the dock edge.").Format(label);
-   if (!mRenderQueue.empty())
-      tooltip = XO("%s\nQueued renders: %d").Format(tooltip.Translation(),
-         static_cast<int>(mRenderQueue.size()));
-   mStatus->SetToolTip(tooltip.Translation());
-   mProgress->SetValue(mRender ? mRender->progress : 0);
+   else if (mRender) {
+      const auto &render = *mRender;
+      label = render.complete ? XO("Waiting to add result: %s").Format(render.label)
+                              : render.label;
+      progress = render.progress;
+      const auto end = render.complete ? render.finished : Clock::now();
+      timing = FormatTime(std::chrono::duration_cast<std::chrono::seconds>(
+         end - render.started).count());
+      const auto time = std::chrono::duration<double>(render.processingTime).count();
+      if (!render.complete && time >= 0.5) {
+         const auto elapsed = render.job->Elapsed();
+         const auto duration = render.job->Duration();
+         if (elapsed > 0.0 && elapsed < duration) {
+            const auto remaining = std::ceil(time * (duration - elapsed) / elapsed);
+            if (remaining <= std::numeric_limits<int>::max())
+               timing += wxT("<") + FormatTime(static_cast<long long>(remaining));
+         }
+      }
+   }
+   auto message = label.Translation();
+   message.Replace(wxT("\n"), wxT(" "));
+   message.Trim();
+   mStatus->SetLabel(message);
+   mStatus->SetToolTip(XO("%s\nDouble-click to widen to the dock edge.")
+      .Format(label).Translation());
+   mProgress->SetValue(progress);
+   if (mTime->GetLabel() != timing) {
+      mTime->SetLabel(timing);
+      Layout();
+   }
+   const auto queueLabel = mRenderQueue.empty() ? XO("Queue")
+      : XO("Queue (%d)").Format(static_cast<int>(mRenderQueue.size()));
+   if (mQueue->GetLabel() != queueLabel.Translation()) {
+      mQueue->SetLabel(queueLabel.Translation());
+      Layout();
+   }
    EnableDisableButtons();
+}
+
+void OperationsToolBar::ShowRenderQueue()
+{
+   wxArrayString entries;
+   if (mRender)
+      entries.Add(XO("Active: %s").Format(mRender->label).Translation());
+   for (const auto &render : mRenderQueue)
+      entries.Add(XO("Pending: %s").Format(render->label).Translation());
+   if (entries.empty())
+      return;
+
+   wxSingleChoiceDialog dialog(this, XO("Select a render to cancel it.").Translation(),
+      XO("Render Queue").Translation(), entries);
+   if (auto *button = dialog.FindWindow(wxID_OK))
+      button->SetLabel(XO("Cancel selected render").Translation());
+   if (auto *button = dialog.FindWindow(wxID_CANCEL))
+      button->SetLabel(XO("Close").Translation());
+   dialog.GetSizer()->SetSizeHints(&dialog);
+   auto viewing = valueRestorer(mViewingQueue, true);
+   if (dialog.ShowModal() != wxID_OK)
+      return;
+   auto row = dialog.GetSelection();
+   if (mRender) {
+      if (row == 0) {
+         AdvanceRenderQueue();
+         return;
+      }
+      --row;
+   }
+   if (row >= 0 && static_cast<size_t>(row) < mRenderQueue.size())
+      mRenderQueue.erase(mRenderQueue.begin() + row);
+   UpdateDisplay();
 }
 
 std::unique_ptr<BasicUI::ProgressDialog> OperationsToolBar::StartEffectProgress(
@@ -434,9 +414,13 @@ void OperationsToolBar::StartMixRender(bool replaceSources)
    render->replaceSources = replaceSources;
    render->sourceCount = selected.size();
    render->waveColor = (*selected.begin())->GetWaveColorIndex();
+   wxString sourceNames;
    for (const auto *track : selected) {
       if (replaceSources)
          render->originals.emplace_back(track->GetId(), SourceState(*track));
+      if (!sourceNames.empty())
+         sourceNames += wxT(", ");
+      sourceNames += track->GetName();
       render->sources->Append(std::move(*track->Duplicate()));
    }
 
@@ -446,6 +430,8 @@ void OperationsToolBar::StartMixRender(bool replaceSources)
       render->timeTrack = time->Duplicate();
    }
 
+   render->label = (replaceSources ? XO("Mix and Render: %s")
+      : XO("Mix and Render to New Track: %s")).Format(sourceNames);
    render->rate = ProjectRate::Get(mProject).GetRate();
    render->format = QualitySettings::SampleFormatChoice();
    mRenderQueue.push_back(std::move(render));
@@ -468,16 +454,6 @@ void OperationsToolBar::StartNextRender()
       TrackList::Get(mProject).MakeUniqueTrackName(XO("Mix").Translation()),
       WaveTrackFactory::Get(mProject), render.rate, render.format, 0.0, 0.0);
    render.started = Clock::now();
-   if (gPrefs->ReadBool(wxT("/AudioIO/MixRenderWorker"), false)) {
-      render.worker = std::make_unique<RenderWorker>();
-      try {
-         render.worker->Start(*render.job, *this);
-      }
-      catch (const std::system_error &) {
-         // The existing UI-sliced path is available if thread creation fails.
-         render.worker.reset();
-      }
-   }
    UpdateDisplay();
 }
 
@@ -506,8 +482,22 @@ void OperationsToolBar::Cancel()
 bool OperationsToolBar::CanServiceRender() const
 {
    const auto &window = ProjectWindow::Get(mProject);
-   return !mEffectProgress && !window.IsBeingDeleted() && window.IsEnabled() &&
+   return !mViewingQueue && !mEffectProgress && !window.IsBeingDeleted() && window.IsEnabled() &&
       !mProject.mbBusyImporting;
+}
+
+void OperationsToolBar::ValidateRenderSources(const Render &render)
+{
+   auto &tracks = TrackList::Get(mProject);
+   const auto *time = *tracks.Any<const TimeTrack>().begin();
+   const bool sourcesMatch = std::all_of(render.originals.begin(), render.originals.end(),
+      [&](const auto &source) {
+         const auto *track = tracks.FindById(source.first);
+         return track && track->IsLeader() && SourceState(*track) == source.second;
+      });
+   if (!sourcesMatch || (time ? SourceState(*time) : wxString{}) != render.warpState)
+      throw SimpleMessageBoxException{ExceptionType::BadUserAction,
+         XO("A render source changed. The project audio was kept."), XO("Mix and Render")};
 }
 
 void OperationsToolBar::OnTimer(wxTimerEvent &)
@@ -532,23 +522,11 @@ void OperationsToolBar::OnTimer(wxTimerEvent &)
       if (!mRender)
          StartNextRender();
       auto &render = *mRender;
-      if (render.worker && !render.complete) {
-         render.worker->ServiceRequest();
-         render.complete = render.worker->done.load();
-         if (render.complete && render.worker->failure)
-            std::rethrow_exception(render.worker->failure);
-         const auto now = Clock::now();
-         render.processingTime = now - render.started;
-         if (render.complete)
-            render.finished = now;
-         const auto duration = render.job->Duration();
-         const auto fraction = duration > 0
-            ? std::clamp(render.worker->elapsed.load() / duration, 0.0, 1.0) : 0.0;
-         render.progress = render.complete ? progressRange
-            : static_cast<int>(progressRange * fraction);
-         UpdateDisplay();
+      if (render.replaceSources && render.validateSources) {
+         ValidateRenderSources(render);
+         render.validateSources = false;
       }
-      else if (!render.complete) {
+      if (!render.complete) {
          const auto start = Clock::now();
          const auto deadline = start + renderBudget;
          do {
@@ -573,7 +551,7 @@ void OperationsToolBar::OnTimer(wxTimerEvent &)
       }
 
       if (!render.complete || AudioIOBusyPred(mProject)) {
-         mTimer.StartOnce(render.complete || render.worker ? blockedPollMs : nextSliceMs);
+         mTimer.StartOnce(render.complete ? blockedPollMs : nextSliceMs);
          return;
       }
 
@@ -586,18 +564,9 @@ void OperationsToolBar::OnTimer(wxTimerEvent &)
       std::vector<Track *> originals;
       Track *insertionPoint{};
       if (render.replaceSources) {
-         for (const auto &[id, state] : render.originals) {
-            auto *track = tracks.FindById(id);
-            if (track && track->IsLeader() && SourceState(*track) == state)
-               originals.push_back(track);
-         }
-         const auto *time = *tracks.Any<const TimeTrack>().begin();
-         if (originals.size() != render.originals.size() ||
-             (time ? SourceState(*time) : wxString{}) != render.warpState) {
-            throw SimpleMessageBoxException{ExceptionType::BadUserAction,
-               XO("A render source changed. The project audio was kept."),
-               XO("Mix and Render")};
-         }
+         ValidateRenderSources(render);
+         for (const auto &source : render.originals)
+            originals.push_back(tracks.FindById(source.first));
 
          // Place the result immediately after the last source in current
          // project order, then remove the original tracks.

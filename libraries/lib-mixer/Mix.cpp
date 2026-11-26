@@ -354,7 +354,7 @@ size_t Mixer::Process(const size_t maxToProcess)
 
    const auto dstStride = (mInterleaved ? mNumChannels : 1);
    auto ditherType = mNeedsDither
-      ? (mHighQuality ? gHighQualityDither.load() : gLowQualityDither.load())
+      ? (mHighQuality ? gHighQualityDither : gLowQualityDither)
       : DitherType::none;
    for (size_t c = 0; c < mNumChannels; ++c)
       CopySamples((constSamplePtr)mTemp[c].data(), floatSample,

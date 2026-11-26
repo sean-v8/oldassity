@@ -2,6 +2,7 @@
 #pragma once
 
 #include "ToolBar.h"
+#include "Observer.h"
 
 #include <deque>
 #include <memory>
@@ -32,9 +33,10 @@ public:
    bool ShownByDefault() const override { return false; }
    DockID DefaultDockID() const override { return BotDockID; }
    void Populate() override;
-   int GetInitialWidth() override { return 320; }
+   int GetInitialWidth() override { return 360; }
+   int GetMinToolbarHeight() override { return 2 * toolbarSingle + toolbarGap; }
    int GetMinToolbarWidth() override;
-   wxSize GetDockedSize() override { return { GetSize().x, toolbarSingle }; }
+   wxSize GetDockedSize() override;
    void Repaint(wxDC *) override {}
    void EnableDisableButtons() override;
    void RegenerateTooltips() override {}
@@ -49,11 +51,17 @@ private:
    struct EffectProgress;
    EffectProgress *mEffectProgress{};
    struct Render;
+   void ValidateRenderSources(const Render &render);
+   void ShowRenderQueue();
+   bool mViewingQueue{};
+   Observer::Subscription mUndoSubscription, mTrackSubscription;
    std::unique_ptr<Render> mRender;
    std::deque<std::unique_ptr<Render>> mRenderQueue;
    wxTimer mTimer{ this };
    wxStaticText *mStatus{};
    wxGauge *mProgress{};
+   wxStaticText *mTime{};
+   wxButton *mQueue{};
    wxButton *mCancel{};
    wxButton *mStop{};
 };
