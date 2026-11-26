@@ -130,6 +130,7 @@ struct LV2Editor::IdleGraph {
       auto *map = base.URIDMapFeature();
       lv2_atom_forge_init(&forge, map);
       meshType = map->map(map->handle, "http://lsp-plug.in/types/lv2/types#Mesh");
+      presetStateType = map->map(map->handle, "http://lsp-plug.in/types/lv2/PresetState");
       const auto portPrefix = std::string(pluginUri) + "/ports#";
       for (const auto *graph : { "ifg", "ofg", "rfg" })
          for (const auto *channel : { "", "_l", "_r", "_m", "_s" })
@@ -159,17 +160,19 @@ struct LV2Editor::IdleGraph {
       uiStates.mControlOut->ReceiveFromInstance();
    }
 
-   bool IsFFTMesh(const LV2_Atom &atom) const
+   bool SuppressIdleAtom(const LV2_Atom &atom) const
    {
       if ((atom.type != forge.Object && atom.type != forge.Blank) ||
           atom.size < sizeof(LV2_Atom_Object_Body))
          return false;
       const auto &body = reinterpret_cast<const LV2_Atom_Object &>(atom).body;
-      return body.otype == meshType &&
-         std::find(fftGraphs.begin(), fftGraphs.end(), body.id) != fftGraphs.end();
+      return (presetStateType && body.otype == presetStateType) ||
+         (body.otype == meshType &&
+          std::find(fftGraphs.begin(), fftGraphs.end(), body.id) != fftGraphs.end());
    }
 
    LV2_URID meshType{};
+   LV2_URID presetStateType{};
    std::vector<LV2_URID> fftGraphs;
    LV2InstanceFeaturesList features;
    LV2PortStates states;
@@ -939,8 +942,8 @@ void LV2Editor::UpdateGraphicalUI()
                                  const IdleGraph *idleGraph = nullptr) {
          if (atomState)
             atomState->SendToDialog([&](const LV2_Atom *atom, uint32_t size){
-               // Hold the last live spectrum while the silent EQ updates its curve.
-               if (idleGraph && idleGraph->IsFFTMesh(*atom))
+               // The silent EQ supplies the curve; the live EQ owns FFT and preset state.
+               if (idleGraph && idleGraph->SuppressIdleAtom(*atom))
                   return;
                suil_instance_port_event(mUI.mSuilInstance.get(),
                   atomState->mpPort->mIndex, size,
