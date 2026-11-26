@@ -158,7 +158,7 @@ It handles initialization and termination by subclassing wxApp.
 #endif
 
 
-#include "../images/Audacity-splash.xpm"
+#include "../images/AudacityLogoWithName.xpm"
 
 #include <thread>
 
@@ -1491,7 +1491,7 @@ bool AudacityApp::InitPart2()
       Journal::SetInputFileName( journalFileName );
 
    // BG: Create a temporary window to set as the top window
-   wxImage logoimage((const char **)Audacity_splash_xpm);
+   wxImage logoimage((const char **)AudacityLogoWithName_xpm);
    logoimage.Scale(logoimage.GetWidth() * (2.0/3.0), logoimage.GetHeight() * (2.0/3.0), wxIMAGE_QUALITY_HIGH);
    if( GetLayoutDirection() == wxLayout_RightToLeft)
       logoimage = logoimage.Mirror();
