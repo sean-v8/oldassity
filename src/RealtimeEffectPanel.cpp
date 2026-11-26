@@ -12,7 +12,7 @@
 
 #include <wx/app.h>
 #include <wx/button.h>
-#include <wx/choice.h>
+#include <wx/statline.h>
 #include <wx/dialog.h>
 #include <wx/listbox.h>
 #include <wx/sizer.h>
@@ -24,7 +24,6 @@
 
 #include <algorithm>
 #include <wx/wupdlock.h>
-#include <wx/hyperlink.h>
 
 #include <wx/dcbuffer.h>
 
@@ -218,49 +217,6 @@ namespace
          dc.SetPen(*wxTRANSPARENT_PEN);
          dc.SetBrush(GetBackgroundColour());
          dc.DrawRectangle(rect);
-      }
-   };
-
-   class HyperLinkCtrlWrapper : public ListNavigationEnabled<wxHyperlinkCtrl>
-   {
-   public:
-      HyperLinkCtrlWrapper(wxWindow *parent,
-                           wxWindowID id,
-                           const wxString& label,
-                           const wxString& url,
-                           const wxPoint& pos = wxDefaultPosition,
-                           const wxSize& size = wxDefaultSize,
-                           long style = wxHL_DEFAULT_STYLE,
-                           const wxString& name = wxHyperlinkCtrlNameStr)
-      {
-         Create(parent, id, label, url, pos, size, style, name);
-      }
-      
-      void Create(wxWindow *parent,
-                  wxWindowID id,
-                  const wxString& label,
-                  const wxString& url,
-                  const wxPoint& pos = wxDefaultPosition,
-                  const wxSize& size = wxDefaultSize,
-                  long style = wxHL_DEFAULT_STYLE,
-                  const wxString& name = wxHyperlinkCtrlNameStr)
-      {
-         ListNavigationEnabled<wxHyperlinkCtrl>::Create(parent, id, label, url, pos, size, style, name);
-         Bind(wxEVT_PAINT, &HyperLinkCtrlWrapper::OnPaint, this);
-      }
-              
-      void OnPaint(wxPaintEvent& evt)
-      {
-         wxPaintDC dc(this);
-         dc.SetFont(GetFont());
-         dc.SetTextForeground(GetForegroundColour());
-         dc.SetTextBackground(GetBackgroundColour());
-
-         auto labelRect = GetLabelRect();
-         
-         dc.DrawText(GetLabel(), labelRect.GetTopLeft());
-         if (HasFocus())
-            AColor::DrawFocus(dc, labelRect);
       }
    };
 
@@ -626,8 +582,6 @@ class RealtimeEffectListWindow
    RealtimeEffectList *mStack{};
    AButton* mAddEffect{nullptr};
    AButton* mAddFavorite{nullptr};
-   wxStaticText* mAddEffectHint{nullptr};
-   wxWindow* mAddEffectTutorialLink{nullptr};
    wxWindow* mEffectListContainer{nullptr};
 
    std::unique_ptr<MenuTable::MenuItem> mEffectMenuRoot;
@@ -644,7 +598,6 @@ public:
                      const wxString& name = wxPanelNameStr)
       : wxScrolledWindow(parent, winid, pos, size, style, name)
    {
-      Bind(wxEVT_SIZE, &RealtimeEffectListWindow::OnSizeChanged, this);
 #ifdef __WXMSW__
       //Fixes flickering on redraw
       wxScrolledWindow::SetDoubleBuffered(true);
@@ -674,28 +627,6 @@ public:
       mAddEffect = addButton(XO("+ Effect"), false);
       mAddFavorite = addButton(XO("+ Favorite"), true);
 
-      auto addEffectHint = safenew ThemedWindowWrapper<wxStaticText>(this, wxID_ANY, wxEmptyString, wxDefaultPosition, wxDefaultSize, wxST_NO_AUTORESIZE);
-      //Workaround: text is set in the OnSizeChange
-      addEffectHint->SetForegroundColorIndex(clrTrackPanelText);
-      mAddEffectHint = addEffectHint;
-
-      auto addEffectTutorialLink = safenew ThemedWindowWrapper<wxHyperlinkCtrl>(
-         this, wxID_ANY, _("Watch video"),
-         "https://www.audacityteam.org/realtime-video", wxDefaultPosition,
-         wxDefaultSize, wxHL_ALIGN_LEFT | wxHL_CONTEXTMENU);
-      
-      //i18n-hint: Hyperlink to the effects stack panel tutorial video
-      addEffectTutorialLink->SetTranslatableLabel(XO("Watch video"));
-#if wxUSE_ACCESSIBILITY
-      safenew WindowAccessible(addEffectTutorialLink);
-#endif
-
-      addEffectTutorialLink->Bind(
-         wxEVT_HYPERLINK, [](wxHyperlinkEvent& event)
-         { BasicUI::OpenInDefaultBrowser(event.GetURL()); });
-
-      mAddEffectTutorialLink = addEffectTutorialLink;
-
       //indicates the insertion position of the item
       auto dropHintLine = safenew ThemedWindowWrapper<DropHintLine>(effectListContainer, wxID_ANY);
       dropHintLine->SetBackgroundColorIndex(clrDropHintHighlight);
@@ -706,8 +637,6 @@ public:
       buttons->Add(mAddEffect, 1, wxEXPAND | wxRIGHT, 4);
       buttons->Add(mAddFavorite, 1, wxEXPAND);
       rootSizer->Add(buttons, 0, wxLEFT | wxRIGHT | wxBOTTOM | wxEXPAND, 20);
-      rootSizer->Add(addEffectHint, 0, wxLEFT | wxRIGHT | wxBOTTOM | wxEXPAND, 20);
-      rootSizer->Add(addEffectTutorialLink, 0, wxLEFT | wxRIGHT | wxEXPAND, 20);
 
       SetSizer(rootSizer.release());
       SetMinSize({});
@@ -900,22 +829,6 @@ public:
       mEffectMenuRoot.swap(root);
    }
    
-   void OnSizeChanged(wxSizeEvent& event)
-   {
-      if(auto sizerItem = GetSizer()->GetItem(mAddEffectHint))
-      {
-         //We need to wrap the text whenever panel width changes and adjust widget height
-         //so that text is fully visible, but there is no height-for-width layout algorithm
-         //in wxWidgets yet, so for now we just do it manually
-
-         //Restore original text, because 'Wrap' will replace it with wrapped one
-         mAddEffectHint->SetLabel(_("Realtime effects are non-destructive and can be changed at any time."));
-         mAddEffectHint->Wrap(GetClientSize().x - sizerItem->GetBorder() * 2);
-         mAddEffectHint->InvalidateBestSize();
-      }
-      event.Skip();
-   }
-
    void OnEffectListItemChange(const RealtimeEffectListMessage& msg)
    {
       if (msg.type == RealtimeEffectListMessage::Type::Reset) {
@@ -926,8 +839,6 @@ public:
       const auto insertItem = [this, &msg](){
          auto& effects = *mStack;
          InsertEffectRow(msg.srcIndex, effects.GetStateAt(msg.srcIndex));
-         mAddEffectHint->Hide();
-         mAddEffectTutorialLink->Hide();
       };
       const auto removeItem = [&](){
          auto& ui = RealtimeEffectStateUI::Get(*msg.affectedState);
@@ -947,8 +858,6 @@ public:
                mAddEffect->SetFocus();
             
             mEffectListContainer->Hide();
-            mAddEffectHint->Show();
-            mAddEffectTutorialLink->Show();
          }
       };
 
@@ -1032,7 +941,6 @@ public:
    {
       wxWindowUpdateLocker freeze(this);
       
-      const auto hadFocus = mEffectListContainer->IsDescendant(FindFocus());
       //delete items that were added to the sizer
       mEffectListContainer->Hide();
       mEffectListContainer->GetSizer()->Clear(true);
@@ -1054,8 +962,6 @@ public:
       //Workaround for GTK: Underlying GTK widget does not update
       //its size when wxWindow size is set to zero
       mEffectListContainer->Show(!isEmpty);
-      mAddEffectHint->Show(isEmpty);
-      mAddEffectTutorialLink->Show(isEmpty);
       
       SendSizeEventToParent();
    }
@@ -1189,18 +1095,13 @@ RealtimeEffectPanel::RealtimeEffectPanel(
       auto toggleEffects = safenew ThemedAButtonWrapper<AButton>(header);
       toggleEffects->SetImageIndices(0, bmpEffectOff, bmpEffectOff, bmpEffectOn, bmpEffectOn, bmpEffectOff);
       toggleEffects->SetButtonToggles(true);
-      toggleEffects->SetTranslatableLabel(XO("Power"));
+      toggleEffects->SetTranslatableLabel(XO("All realtime effects power"));
       toggleEffects->SetBackgroundColorIndex(clrMedium);
       mToggleEffects = toggleEffects;
 
       toggleEffects->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) {
-         if (mEffectList)
-         {
-            mEffectList->EnableEffects(mToggleEffects->IsDown());
-         
-            ProjectHistory::Get(mProject).ModifyState(false);
-            UndoManager::Get(mProject).MarkUnsaved();
-         }
+         RealtimeEffectList::Get(mProject).SetProjectEffectsEnabled(mToggleEffects->IsDown());
+         SavePowerSettings();
       });
 
       hSizer->Add(toggleEffects, 0, wxSTRETCH_NOT | wxALIGN_CENTER | wxLEFT, 5);
@@ -1212,12 +1113,7 @@ RealtimeEffectPanel::RealtimeEffectPanel(
          headerText->SetTranslatableLabel(XO("Realtime Effects"));
          headerText->SetForegroundColorIndex(clrTrackPanelText);
 
-         auto trackTitle = safenew ThemedWindowWrapper<wxStaticText>(header, wxID_ANY, wxEmptyString, wxDefaultPosition, wxDefaultSize, wxST_ELLIPSIZE_END);
-         trackTitle->SetForegroundColorIndex(clrTrackPanelText);
-         mTrackTitle = trackTitle;
-
          vSizer->Add(headerText);
-         vSizer->Add(trackTitle);
 
          hSizer->Add(vSizer.release(), 1, wxEXPAND | wxALL, 10);
       }
@@ -1233,31 +1129,50 @@ RealtimeEffectPanel::RealtimeEffectPanel(
       header->SetSizer(hSizer.release());
    }
    vSizer->Add(header, 0, wxEXPAND);
-   wxArrayString stacks;
-   stacks.Add(_("Track Effects"));
-   stacks.Add(_("Master Effects"));
-   mStackChoice = safenew ThemedWindowWrapper<wxChoice>(this, wxID_ANY,
-      wxDefaultPosition, wxDefaultSize, stacks);
-   mStackChoice->SetName(_("Effects stack"));
-   mStackChoice->SetSelection(0);
-   mStackChoice->Bind(wxEVT_CHOICE, [this](wxCommandEvent &event) {
-      if (event.GetSelection() == 1)
-         ShowMaster(false);
-      else {
-         mShowingMaster = false;
-         auto *track = dynamic_cast<SampleTrack *>(TrackFocus::Get(mProject).Get());
-         ShowPanel(track, false);
-      }
-   });
-   vSizer->Add(mStackChoice, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 10);
+   const auto addStackHeader = [&](const TranslatableString &powerLabel,
+      const TranslatableString &title, AButton *&power) {
+      auto *row = safenew wxBoxSizer(wxHORIZONTAL);
+      auto *button = safenew ThemedAButtonWrapper<AButton>(this);
+      button->SetImageIndices(0, bmpEffectOff, bmpEffectOff, bmpEffectOn,
+         bmpEffectOn, bmpEffectOff);
+      button->SetButtonToggles(true);
+      button->SetTranslatableLabel(powerLabel);
+      button->SetBackgroundColorIndex(clrMedium);
+      power = button;
+      auto *label = safenew ThemedWindowWrapper<wxStaticText>(this, wxID_ANY,
+         wxEmptyString, wxDefaultPosition, wxDefaultSize, wxST_ELLIPSIZE_END);
+      label->SetTranslatableLabel(title);
+      label->SetForegroundColorIndex(clrTrackPanelText);
+      row->Add(button, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 6);
+      row->Add(label, 1, wxALIGN_CENTER_VERTICAL);
+      vSizer->Add(row, 0, wxEXPAND | wxALL, 6);
+      return label;
+   };
 
+   addStackHeader(XO("Master effects power"), XO("Master"), mMasterPower);
+   auto *MasterList = safenew ThemedWindowWrapper<RealtimeEffectListWindow>(this, wxID_ANY);
+   MasterList->SetBackgroundColorIndex(clrMedium);
+   mMasterList = MasterList;
+   vSizer->Add(mMasterList, 1, wxEXPAND);
+   vSizer->Add(safenew wxStaticLine(this), 0, wxEXPAND | wxLEFT | wxRIGHT, 6);
 
-   auto effectList = safenew ThemedWindowWrapper<RealtimeEffectListWindow>(this, wxID_ANY);
-   effectList->SetBackgroundColorIndex(clrMedium);
-   vSizer->Add(effectList, 1, wxEXPAND);
-
+   mTrackTitle = addStackHeader(XO("Track effects power"), {}, mTrackPower);
+   auto *EffectList = safenew ThemedWindowWrapper<RealtimeEffectListWindow>(this, wxID_ANY);
+   EffectList->SetBackgroundColorIndex(clrMedium);
+   mEffectList = EffectList;
+   vSizer->Add(mEffectList, 1, wxEXPAND);
    mHeader = header;
-   mEffectList = effectList;
+   mMasterList->SetMaster(mProject);
+   mTrackPower->Disable();
+   mMasterPower->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) {
+      mMasterList->EnableEffects(mMasterPower->IsDown());
+      SavePowerSettings();
+   });
+   mTrackPower->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) {
+      mEffectList->EnableEffects(mTrackPower->IsDown());
+      SavePowerSettings();
+   });
+   UpdatePowerButtons();
 
    SetSizerAndFit(vSizer.release());
 
@@ -1309,10 +1224,7 @@ RealtimeEffectPanel::RealtimeEffectPanel(
             message.type == UndoRedoMessage::Type::UndoOrRedo ||
             message.type == UndoRedoMessage::Type::Reset)
          {
-            if (mShowingMaster) {
-               auto &list = RealtimeEffectList::Get(mProject);
-               list.IsActive() ? mToggleEffects->PushDown() : mToggleEffects->PopUp();
-            }
+            UpdatePowerButtons();
             for (auto waveTrack : waveTracks)
                UpdateRealtimeEffectUIData(*waveTrack);
          }
@@ -1371,7 +1283,7 @@ RealtimeEffectPanel::RealtimeEffectPanel(
 
    mFocusChangeSubscription = TrackFocus::Get(project)
       .Subscribe([this](const TrackFocusChangeMessage& msg) {
-         if (IsShown() && !mShowingMaster)
+         if (IsShown())
          {
             auto& trackFocus = TrackFocus::Get(mProject);
             ShowPanel(dynamic_cast<SampleTrack *>(trackFocus.Get()), false);
@@ -1388,11 +1300,6 @@ RealtimeEffectPanel::~RealtimeEffectPanel()
 
 void RealtimeEffectPanel::ShowPanel(SampleTrack* track, bool focus)
 {
-   if (mShowingMaster && !focus)
-      return;
-
-   mShowingMaster = false;
-   mStackChoice->SetSelection(0);
    wxWindowUpdateLocker freeze(this);
    if (track)
       SetTrack(track->SharedPointer<SampleTrack>());
@@ -1403,16 +1310,9 @@ void RealtimeEffectPanel::ShowPanel(SampleTrack* track, bool focus)
 
 void RealtimeEffectPanel::ShowMaster(bool focus)
 {
-   wxWindowUpdateLocker freeze(this);
-   mShowingMaster = true;
-   mStackChoice->SetSelection(1);
-   mEffectList->SetMaster(mProject);
-   auto &list = RealtimeEffectList::Get(mProject);
-   mTrackTitle->SetLabel(_("Master"));
-   mHeader->SetName(_("Master Effects"));
-   mToggleEffects->Enable();
-   list.IsActive() ? mToggleEffects->PushDown() : mToggleEffects->PopUp();
-   ShowPanelWindow(focus);
+   ShowPanel(dynamic_cast<SampleTrack *>(TrackFocus::Get(mProject).Get()), false);
+   if (focus)
+      mMasterPower->SetFocus();
 }
 
 void RealtimeEffectPanel::ShowPanelWindow(bool focus)
@@ -1451,20 +1351,15 @@ void RealtimeEffectPanel::HidePanel()
 
 void RealtimeEffectPanel::SetTrack(const std::shared_ptr<SampleTrack>& track)
 {
-   if (mShowingMaster)
-      return;
 
    //Avoid creation-on-demand of a useless, empty list in case the track is of non-wave type.
    if(track && dynamic_cast<WaveTrack*>(&*track) != nullptr)
    {
       mTrackTitle->SetLabel(track->GetName());
-      mToggleEffects->Enable();
-      track && RealtimeEffectList::Get(*track).IsActive()
-         ? mToggleEffects->PushDown()
-         : mToggleEffects->PopUp();
+      mTrackPower->Enable();
       mEffectList->SetTrack(mProject, track);
-
       mCurrentTrack = track;
+      UpdatePowerButtons();
       //i18n-hint: argument - track name
       mHeader->SetName(wxString::Format(_("Realtime effects for %s"), track->GetName()));
    }
@@ -1474,13 +1369,28 @@ void RealtimeEffectPanel::SetTrack(const std::shared_ptr<SampleTrack>& track)
 
 void RealtimeEffectPanel::ResetTrack()
 {
-   mShowingMaster = false;
-   mStackChoice->SetSelection(0);
    mTrackTitle->SetLabel(wxEmptyString);
-   mToggleEffects->Disable();
+   mTrackPower->Disable();
+   mTrackPower->PopUp();
    mEffectList->ResetTrack();
    mCurrentTrack.reset();
    mHeader->SetName(wxEmptyString);
+}
+
+void RealtimeEffectPanel::SavePowerSettings()
+{
+   ProjectHistory::Get(mProject).ModifyState(false);
+   UndoManager::Get(mProject).MarkUnsaved();
+}
+
+void RealtimeEffectPanel::UpdatePowerButtons()
+{
+   const auto &master = RealtimeEffectList::Get(mProject);
+   master.AreProjectEffectsEnabled() ? mToggleEffects->PushDown() : mToggleEffects->PopUp();
+   master.IsActive() ? mMasterPower->PushDown() : mMasterPower->PopUp();
+   const auto track = mCurrentTrack.lock();
+   track && RealtimeEffectList::Get(*track).IsActive()
+      ? mTrackPower->PushDown() : mTrackPower->PopUp();
 }
 
 void RealtimeEffectPanel::SetFocus()

@@ -4,6 +4,7 @@
 #include "AudacityException.h"
 #include "EffectBase.h"
 #include "MixAndRender.h"
+#include "RealtimeEffectList.h"
 #include "ProjectHistory.h"
 #include "ProjectRate.h"
 #include "QualitySettings.h"
@@ -83,6 +84,7 @@ struct OperationsToolBar::Render {
    std::vector<std::pair<TrackId, wxString>> originals;
    wxString warpState;
    bool replaceSources{};
+   bool effectsEnabled{true};
    double rate{};
    sampleFormat format{};
    size_t sourceCount{};
@@ -432,6 +434,7 @@ void OperationsToolBar::StartMixRender(bool replaceSources)
 
    render->label = (replaceSources ? XO("Mix and Render: %s")
       : XO("Mix and Render to New Track: %s")).Format(sourceNames);
+   render->effectsEnabled = RealtimeEffectList::Get(mProject).AreProjectEffectsEnabled();
    render->rate = ProjectRate::Get(mProject).GetRate();
    render->format = QualitySettings::SampleFormatChoice();
    mRenderQueue.push_back(std::move(render));
@@ -452,7 +455,8 @@ void OperationsToolBar::StartNextRender()
    render.job = MixRenderJob::Begin(
       render.sources->Any<const WaveTrack>(), Mixer::WarpOptions{warp},
       TrackList::Get(mProject).MakeUniqueTrackName(XO("Mix").Translation()),
-      WaveTrackFactory::Get(mProject), render.rate, render.format, 0.0, 0.0);
+      WaveTrackFactory::Get(mProject), render.rate, render.format, 0.0, 0.0,
+      render.effectsEnabled);
    render.started = Clock::now();
    UpdateDisplay();
 }

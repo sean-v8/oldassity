@@ -134,8 +134,9 @@ void RealtimeEffectManager::ProcessStart(bool suspended)
 {
    // Can be suspended because of the audio stream being paused or because
    // effects have been suspended.
-   VisitAll([suspended](RealtimeEffectState &state, bool listIsActive){
-      state.ProcessStart(!suspended && listIsActive);
+   const auto enabled = RealtimeEffectList::Get(mProject).AreProjectEffectsEnabled();
+   VisitAll([suspended, enabled](RealtimeEffectState &state, bool listIsActive){
+      state.ProcessStart(!suspended && enabled && listIsActive);
    });
 }
 

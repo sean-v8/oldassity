@@ -20,7 +20,6 @@
 class SampleTrack;
 
 class wxButton;
-class wxChoice;
 class wxStaticText;
 class wxBitmapButton;
 
@@ -38,8 +37,8 @@ class RealtimeEffectPanel : public wxPanel
    wxStaticText* mTrackTitle {nullptr};
    RealtimeEffectListWindow* mEffectList{nullptr};
    wxWindow* mHeader{nullptr};
-   wxChoice *mStackChoice{};
-   bool mShowingMaster{};
+   AButton *mMasterPower{}, *mTrackPower{};
+   RealtimeEffectListWindow *mMasterList{};
    AudacityProject& mProject;
 
    std::weak_ptr<SampleTrack> mCurrentTrack;
@@ -88,4 +87,6 @@ public:
 private:
    void OnCharHook(wxKeyEvent& evt);
    void ShowPanelWindow(bool focus);
+   void UpdatePowerButtons();
+   void SavePowerSettings();
 };

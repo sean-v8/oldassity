@@ -158,6 +158,8 @@ public:
 
    //! Done by main thread only, under a lock guard
    void SetActive(bool value);
+   bool AreProjectEffectsEnabled() const { return mProjectEffectsEnabled.load(std::memory_order_relaxed); }
+   void SetProjectEffectsEnabled(bool enabled) { mProjectEffectsEnabled.store(enabled, std::memory_order_relaxed); }
 
 private:
    States mStates;
@@ -166,6 +168,7 @@ private:
    mutable Lock mLock;
 
    std::atomic<bool> mActive{ true };
+   std::atomic<bool> mProjectEffectsEnabled{true};
 };
 
 #endif // __AUDACITY_REALTIMEEFFECTLIST_H__

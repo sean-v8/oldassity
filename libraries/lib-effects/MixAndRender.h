@@ -64,7 +64,7 @@ public:
       const TrackIterRange<const WaveTrack> &tracks,
       const Mixer::WarpOptions &warpOptions, const wxString &newTrackName,
       WaveTrackFactory &factory, double rate, sampleFormat format,
-      double startTime, double endTime);
+      double startTime, double endTime, bool effectsEnabled = true);
 
    //! Process up to maxSamples. False means end of input.
    bool ProcessNext(size_t maxSamples);

@@ -26,7 +26,7 @@ std::unique_ptr<MixRenderJob> MixRenderJob::Begin(
    const TrackIterRange<const WaveTrack> &trackRange,
    const Mixer::WarpOptions &warpOptions, const wxString &newTrackName,
    WaveTrackFactory &trackFactory, double rate, sampleFormat format,
-   double startTime, double endTime)
+   double startTime, double endTime, bool effectsEnabled)
 {
    if (trackRange.empty())
       return {};
@@ -71,7 +71,8 @@ std::unique_ptr<MixRenderJob> MixRenderJob::Begin(
    for (auto wt : trackRange) {
       const auto stretchingSequence =
          StretchingSequence::Create(*wt, wt->GetClipInterfaces());
-      waveArray.emplace_back(stretchingSequence, GetEffectStages(*wt));
+      waveArray.emplace_back(stretchingSequence,
+         effectsEnabled ? GetEffectStages(*wt) : Mixer::Stages{});
       tstart = wt->GetStartTime();
       tend = wt->GetEndTime();
       if (tend > mixEndTime)
@@ -225,11 +226,17 @@ std::vector<MixerOptions::StageSpecification> GetEffectStagesFor(const Host &hos
 
 std::vector<MixerOptions::StageSpecification> GetEffectStages(const WaveTrack &track)
 {
+   const auto list = track.GetOwner();
+   const auto *project = list ? list->GetOwner() : nullptr;
+   if (project && !RealtimeEffectList::Get(*project).AreProjectEffectsEnabled())
+      return {};
    return GetEffectStagesFor(track);
 }
 
 std::vector<MixerOptions::StageSpecification> GetMasterEffectStages(const AudacityProject &project)
 {
+   if (!RealtimeEffectList::Get(project).AreProjectEffectsEnabled())
+      return {};
    return GetEffectStagesFor(project);
 }
 

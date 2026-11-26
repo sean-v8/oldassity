@@ -27,6 +27,7 @@ std::unique_ptr<ClientData::Cloneable<>> RealtimeEffectList::Clone() const
    for (auto &pState : mStates)
       result->mStates.push_back(pState);
    result->SetActive(this->IsActive());
+   result->SetProjectEffectsEnabled(AreProjectEffectsEnabled());
    return result;
 }
 
@@ -244,6 +245,8 @@ bool RealtimeEffectList::HandleXMLTag(
       for (auto &[attr, value] : attrs) {
          if (attr == activeAttribute)
             SetActive(value.Get<bool>());
+         else if (attr == "projecteffects")
+            SetProjectEffectsEnabled(value.Get<bool>());
       }
       return true;
    }
@@ -263,6 +266,8 @@ void RealtimeEffectList::WriteXML(XMLWriter &xmlFile) const
 {
    xmlFile.StartTag(XMLTag());
    xmlFile.WriteAttr(activeAttribute, IsActive());
+   if (!AreProjectEffectsEnabled())
+      xmlFile.WriteAttr("projecteffects", false);
    for (const auto & state : mStates)
       state->WriteXML(xmlFile);
    xmlFile.EndTag(XMLTag());
@@ -276,6 +281,7 @@ void RealtimeEffectList::RestoreUndoRedoState(AudacityProject &project)
       LockGuard lock{current.mLock};
       current.mStates.swap(restored);
       current.mActive.store(IsActive(), std::memory_order_relaxed);
+      current.SetProjectEffectsEnabled(AreProjectEffectsEnabled());
    }
    current.Publish({RealtimeEffectListMessage::Type::Reset, 0, 0, {}});
 }

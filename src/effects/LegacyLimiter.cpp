@@ -84,7 +84,7 @@ private:
 
 // Give the port its own plug-in identity so existing Nyquist presets and
 // macros continue to find the original offline Limiter.
-const ComponentInterfaceSymbol EffectLegacyLimiter::Symbol{ XO("Limiter (Realtime)") };
+const ComponentInterfaceSymbol EffectLegacyLimiter::Symbol{ wxT("Limiter (Realtime)"), XO("Limiter") };
 BuiltinEffectsModule::Registration<EffectLegacyLimiter> reg;
 
 struct EffectLegacyLimiter::Instance final
