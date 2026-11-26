@@ -153,6 +153,7 @@ public:
    bool mResizing{ false };
 #if defined(__WXGTK__)
    bool mResized{ false };
+   bool mInitialHostFocus{ true };
 #endif
 
    wxWeakRef<wxDialog> mDialog;

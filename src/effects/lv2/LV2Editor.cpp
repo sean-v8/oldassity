@@ -40,6 +40,7 @@
 #include <wx/checkbox.h>
 #include <wx/choice.h>
 #include <wx/dialog.h>
+#include <wx/panel.h>
 
 #include <wx/sizer.h>
 
@@ -950,6 +951,18 @@ void LV2Editor::UpdateGraphicalUI()
 {
    if (!mUI.mSuilInstance)
       return;
+
+#if defined(__WXGTK__)
+   if (mInitialHostFocus && mpIdleGraph && mUI.mNativeWin &&
+       mParent && mDialog && mDialog->IsActive()) {
+      mInitialHostFocus = false;
+      // Give transport shortcuts a host focus target when the editor opens.
+      if (auto *panel = wxDynamicCast(mParent, wxPanel); panel && panel->m_wxwindow) {
+         gtk_widget_set_can_focus(GTK_WIDGET(panel->m_wxwindow), TRUE);
+         panel->SetFocusIgnoringChildren();
+      }
+   }
+#endif
 
    if (!mExternalUIClosed) {
       const auto sendAtoms = [&](const LV2AtomPortStatePtr &atomState,
