@@ -16,6 +16,9 @@
 #include <wx/statbmp.h>
 #include <wx/stattext.h>
 #include <wx/menu.h>
+#include <wx/tokenzr.h>
+
+#include <algorithm>
 #include <wx/wupdlock.h>
 #include <wx/hyperlink.h>
 
@@ -762,6 +765,33 @@ public:
          menu.AppendSeparator();
       }
       
+      constexpr auto favoritesKey = wxT("/GUI/RealtimeEffectFavorites");
+      auto favorites = wxStringTokenize(gPrefs->Read(favoritesKey, wxString{}), "\n");
+      const bool alreadyFavorite = favorites.Index(selectedEffectID) != wxNOT_FOUND;
+
+      auto favoriteMenu = std::make_unique<wxMenu>();
+      std::vector<std::pair<int, wxString>> shortcuts;
+      for (const auto &id : favorites) {
+         const auto *plugin = PluginManager::Get().GetPlugin(id);
+         if (plugin && plugin->IsEnabled() && plugin->IsEffectRealtime()) {
+            auto *item = favoriteMenu->Append(wxID_ANY,
+               plugin->GetSymbol().Msgid().Translation());
+            shortcuts.emplace_back(item->GetId(), id);
+         }
+      }
+      if (shortcuts.empty())
+         favoriteMenu->Append(wxID_ANY, _("No favorites yet"))->Enable(false);
+
+      int toggleFavorite = wxID_NONE;
+      if (!selectedEffectID.empty()) {
+         favoriteMenu->AppendSeparator();
+         toggleFavorite = favoriteMenu->Append(wxID_ANY, alreadyFavorite
+            ? _("Remove current effect from Favorites")
+            : _("Add current effect to Favorites"))->GetId();
+      }
+      menu.AppendSubMenu(favoriteMenu.release(), _("Favorites"));
+      menu.AppendSeparator();
+
       RealtimeEffectsMenuVisitor visitor { menu };
       
       Registry::Visit(visitor, mEffectMenuRoot.get());
@@ -779,8 +809,24 @@ public:
             return wxString {};
          else if(commandId == wxID_MORE)
             OpenInDefaultBrowser("https://plugins.audacityteam.org/");
-         else
-            return visitor.GetPluginID(commandId).GET();
+         else if (commandId == toggleFavorite) {
+            if (alreadyFavorite)
+               favorites.Remove(selectedEffectID);
+            else
+               favorites.Add(selectedEffectID);
+            gPrefs->Write(favoritesKey, wxJoin(favorites, '\n', '\0'));
+            gPrefs->Flush();
+         }
+         else {
+            const auto shortcut = std::find_if(shortcuts.begin(), shortcuts.end(),
+               [commandId](const auto &entry) { return entry.first == commandId; });
+            if (shortcut != shortcuts.end()) {
+               if (shortcut->second != selectedEffectID)
+                  return shortcut->second;
+            }
+            else
+               return visitor.GetPluginID(commandId).GET();
+         }
       }
       
       return {};
