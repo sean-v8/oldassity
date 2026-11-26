@@ -44,6 +44,8 @@ struct OperationsToolBar::Render {
    Clock::duration processingTime{};
    Clock::time_point previousSliceEnd{};
    Clock::time_point lastDisplay{};
+   Clock::time_point started{};
+   Clock::time_point finished{};
    bool complete{};
 };
 
@@ -71,7 +73,7 @@ OperationsToolBar::~OperationsToolBar()
 void OperationsToolBar::Populate()
 {
    mStatus = safenew wxStaticText(this, wxID_ANY, wxString{},
-      wxDefaultPosition, wxSize(100, -1), wxST_ELLIPSIZE_END);
+      wxDefaultPosition, wxSize(100, -1), wxST_ELLIPSIZE_END | wxST_NO_AUTORESIZE);
    mProgress = safenew wxGauge(this, wxID_ANY, progressRange, wxDefaultPosition,
       wxSize(32, 12));
    mProgress->SetName(XO("Operation progress").Translation());
@@ -79,7 +81,7 @@ void OperationsToolBar::Populate()
       wxDefaultPosition, wxSize(-1, toolbarSingle), wxBU_EXACTFIT);
    mCancel->Bind(wxEVT_BUTTON, [this](wxCommandEvent &) { Cancel(); });
 
-   Add(mStatus, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 4);
+   Add(mStatus, 2, wxALIGN_CENTER_VERTICAL | wxRIGHT, 4);
    Add(mProgress, 1, wxALIGN_CENTER_VERTICAL | wxRIGHT, 4);
    Add(mCancel, 0, wxALIGN_CENTER_VERTICAL);
 
@@ -112,6 +114,19 @@ void OperationsToolBar::UpdateDisplay()
 {
    auto label = !mRender ? XO("No active operation") :
       mRender->complete ? XO("Ready to add mix") : XO("Mix and Render");
+   const auto formatTime = [](long long seconds) {
+      if (seconds >= 3600)
+         return wxString::Format("%lld:%02lld:%02lld",
+            seconds / 3600, seconds / 60 % 60, seconds % 60);
+      return wxString::Format("%lld:%02lld", seconds / 60, seconds % 60);
+   };
+   wxString elapsedText;
+   if (mRender) {
+      const auto end = mRender->complete ? mRender->finished : Clock::now();
+      elapsedText = formatTime(std::chrono::duration_cast<std::chrono::seconds>(
+         end - mRender->started).count());
+      label = XO("%s · %s elapsed").Format(label.Translation(), elapsedText);
+   }
    if (mRender && !mRender->complete) {
       const auto duration = mRender->job->Duration();
       const auto elapsed = mRender->job->Elapsed();
@@ -120,8 +135,8 @@ void OperationsToolBar::UpdateDisplay()
          const auto remaining = std::ceil(time * (duration - elapsed) / elapsed);
          if (remaining >= 0 && remaining <= std::numeric_limits<int>::max()) {
             const auto seconds = static_cast<int>(remaining);
-            label = XO("Mix · %s left").Format(
-               wxString::Format("%d:%02d", seconds / 60, seconds % 60));
+            label = XO("Mix and Render · %s elapsed · %s left").Format(
+               elapsedText, formatTime(seconds));
          }
       }
    }
@@ -164,6 +179,7 @@ void OperationsToolBar::StartMixRender()
    if (!render->job)
       return;
 
+   render->started = Clock::now();
    mRender = std::move(render);
    UpdateDisplay();
    ToolManager::Get(mProject).Expose(ID(), true);
@@ -209,6 +225,8 @@ void OperationsToolBar::OnTimer(wxTimerEvent &)
          const auto previousEnd = render.previousSliceEnd;
          render.processingTime += now - (previousEnd == Clock::time_point{} ? start : previousEnd);
          render.previousSliceEnd = now;
+         if (render.complete)
+            render.finished = now;
          const auto duration = render.job->Duration();
          const auto fraction = duration > 0.0
             ? std::clamp(render.job->Elapsed() / duration, 0.0, 1.0) : 0.0;
