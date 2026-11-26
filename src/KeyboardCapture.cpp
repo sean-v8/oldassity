@@ -9,6 +9,7 @@
  **********************************************************************/
 
 #include "KeyboardCapture.h"
+#include "TrackPanel.h"
 
 #if defined(__WXMAC__)
 #include "CFResources.h"
@@ -65,8 +66,8 @@ void Capture(wxWindow *handler)
 
 void Release(wxWindow *handler)
 {
-//   wxASSERT(sHandler() == handler);
-   sHandler() = nullptr;
+   if (IsHandler(handler))
+      sHandler() = nullptr;
 }
 
 void OnFocus( wxWindow &window, wxFocusEvent &event )
@@ -208,6 +209,12 @@ public:
 
          // Give the capture handler first dibs at the event.
          wxWindow *handler = KeyboardCapture::GetHandler();
+         auto *focus = wxWindow::FindFocus();
+         // The panel can keep native focus after keyboard capture is reset.
+         if ((!handler || wxGetTopLevelParent(handler) != wxGetTopLevelParent(focus)) &&
+             dynamic_cast<TrackPanel *>(focus))
+            handler = focus;
+
          if (handler && HandleCapture(handler, key))
          {
             return Event_Processed;
