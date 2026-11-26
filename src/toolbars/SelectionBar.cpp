@@ -227,7 +227,7 @@ void SelectionBar::AddTime(
    auto pCtrl = safenew NumericTextCtrl(FormatterContext::ProjectContext(mProject),
       this, id, NumericConverterType_TIME(), formatName, 0.0);
 
-   pCtrl->SetDigitSize(14, 23);
+   pCtrl->SetDigitSize(16, 29);
 
    pCtrl->Bind(
       wxEVT_TEXT,

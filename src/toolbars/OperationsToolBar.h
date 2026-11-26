@@ -33,8 +33,8 @@ public:
    bool ShownByDefault() const override { return false; }
    DockID DefaultDockID() const override { return BotDockID; }
    void Populate() override;
-   int GetInitialWidth() override { return 360; }
-   int GetMinToolbarHeight() override { return 2 * toolbarSingle + toolbarGap; }
+   int GetInitialWidth() override { return 340; }
+   int GetMinToolbarHeight() override { return toolbarTriple; }
    int GetMinToolbarWidth() override;
    wxSize GetDockedSize() override;
    void Repaint(wxDC *) override {}

@@ -59,6 +59,7 @@ class AUDACITY_DLL_API SelectionBar final : public ToolBar {
 
    void Create(wxWindow *parent) override;
 
+   int GetMinToolbarHeight() override { return toolbarTriple; }
    void Populate() override;
    void ResizingDone() override;
    void Repaint(wxDC * WXUNUSED(dc)) override {};

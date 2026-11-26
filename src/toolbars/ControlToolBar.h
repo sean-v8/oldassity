@@ -70,6 +70,8 @@ class AUDACITY_DLL_API ControlToolBar final : public ToolBar {
    // Return the Audio IO token or -1 for failure
    void PlayDefault();
 
+   DockID DefaultDockID() const override { return BotDockID; }
+   int GetMinToolbarHeight() override { return toolbarTriple; }
    void Populate() override;
    void Repaint(wxDC *dc) override;
    void EnableDisableButtons() override;

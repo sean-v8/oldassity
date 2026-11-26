@@ -517,19 +517,6 @@ void ToolBar::SetToDefaultSize(){
    SetSize( sz );
 }
 
-wxSize ToolBar::GetSmartDockedSize()
-{
-   const int tbs = toolbarSingle + toolbarGap;
-   wxSize sz = GetSize();
-   // 46 is the size where we switch from expanded to compact.
-   if( sz.y < 46 )
-      sz.y = tbs-1;
-   else 
-      sz.y = 2 * tbs -1;
-   return sz;
-}
-
-
 void ToolBar::ReCreateButtons()
 {
    wxSize sz3 = GetSize();
@@ -585,7 +572,8 @@ void ToolBar::ReCreateButtons()
    // Recalculate the height to be a multiple of toolbarSingle
    const int tbs = toolbarSingle + toolbarGap;
    wxSize sz = GetSize();
-   sz.y = ( ( ( sz.y + tbs -1) / tbs ) * tbs ) - 1;
+   sz.y = std::max(GetMinToolbarHeight(),
+      ( ( ( sz.y + tbs -1) / tbs ) * tbs ) - 1);
 
    // Set the true AND minimum sizes and do final layout
    if(IsResizable())

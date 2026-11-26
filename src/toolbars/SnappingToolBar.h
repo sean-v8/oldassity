@@ -43,6 +43,7 @@ class SnappingToolBar final : public ToolBar {
 
    void Create(wxWindow *parent) override;
 
+   int GetMinToolbarHeight() override { return toolbarTriple; }
    void Populate() override;
    void Repaint(wxDC * WXUNUSED(dc)) override {};
    void EnableDisableButtons() override {};

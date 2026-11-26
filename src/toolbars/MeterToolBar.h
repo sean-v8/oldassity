@@ -25,38 +25,12 @@ class wxWindow;
 
 class AudacityProject;
 class MeterPanel;
-class MeterToolBar;
-
-using MeterToolBars = std::vector< std::reference_wrapper<MeterToolBar> >;
-using ConstMeterToolBars = std::vector< std::reference_wrapper<const MeterToolBar> >;
-
-// Constants used as bit pattern
-constexpr int kWithRecordMeter = 1;
-constexpr int kWithPlayMeter = 2;
-constexpr int kCombinedMeter = kWithPlayMeter | kWithRecordMeter;
-
 class MeterToolBar final : public ToolBar {
-
- public:
-
+public:
    static Identifier ID();
-   static Identifier PlayID();
-   static Identifier RecordID();
-
-   MeterToolBar(AudacityProject &project,
-      unsigned whichMeters,
-      const TranslatableString &label, Identifier ID);
-   virtual ~MeterToolBar();
-
-   static MeterToolBars GetToolBars(AudacityProject &project);
-   static ConstMeterToolBars GetToolBars(const AudacityProject &project);
-
-   static MeterToolBar & Get(AudacityProject &project, bool forPlayMeterToolBar);
-   static const MeterToolBar & Get(const AudacityProject &project, bool forPlayMeterToolBar);
-
-   bool ShownByDefault() const override;
-
-   void Create(wxWindow *parent) override;
+   explicit MeterToolBar(AudacityProject &project);
+   static MeterToolBar &Get(AudacityProject &project);
+   DockID DefaultDockID() const override { return BotDockID; }
 
    void Populate() override;
    void ReCreateButtons() override;
@@ -65,14 +39,12 @@ class MeterToolBar final : public ToolBar {
    void UpdatePrefs() override;
    void UpdateControls();
 
-   void OnSize(wxSizeEvent & event);
    bool Expose(bool show) override;
 
    int GetInitialWidth() override;
    int GetMinToolbarWidth()  override { return 150; }
-   wxSize GetDockedSize() override {
-      return GetSmartDockedSize();
-   };
+   int GetMinToolbarHeight() override { return toolbarTriple; }
+   wxSize GetDockedSize() override { return {GetSize().x, toolbarTriple}; }
 
    void ShowOutputGainDialog();
    void ShowInputGainDialog();
@@ -82,10 +54,6 @@ class MeterToolBar final : public ToolBar {
 
  private:
    void RegenerateTooltips() override {}
-   void RebuildLayout(bool force);
-
-   unsigned mWhichMeters;
-   wxBoxSizer *mRootSizer{nullptr};
    AButton* mPlaySetupButton{nullptr};
    MeterPanel *mPlayMeter{nullptr};
    AButton* mRecordSetupButton{nullptr};
@@ -94,7 +62,6 @@ class MeterToolBar final : public ToolBar {
  public:
 
    DECLARE_CLASS(MeterToolBar)
-   DECLARE_EVENT_TABLE()
 
 };
 

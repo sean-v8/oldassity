@@ -527,40 +527,31 @@ static struct DefaultConfigEntry {
    Identifier below;   // preceding sibling
 } DefaultConfigTable [] = {
    // Top dock row, may wrap
-   { wxT("Control"),           {},                     {}                },
-   { wxT("Tools"),             wxT("Control"),         {}                },
+   { wxT("Tools"),             {},                     {}                },
    { wxT("Edit"),              wxT("Tools"),           {}                },
    { wxT("CutCopyPaste"),      wxT("Edit"),            {}                },
    { wxT("Audio Setup"),       wxT("CutCopyPaste"),    {}                },
 #ifdef HAS_AUDIOCOM_UPLOAD
    { wxT("Share Audio"),       wxT("Audio Setup"),     {}                },
-   { wxT("RecordMeter"),       wxT("Share Audio"),     {}                },
-#else
-   { wxT("RecordMeter"),       wxT("Audio Setup"),     {}                },
 #endif
-   { wxT("PlayMeter"),         wxT("RecordMeter"),     {}                },
 
    // start another top dock row
-   { wxT("Scrub"),             {},                     wxT("Control")         },
-   { wxT("Device"),            wxT("Scrub"),           wxT("Control")         },
-
-   // Hidden by default in top dock
-   { wxT("CombinedMeter"),     {},                     {}                },
+   { wxT("Scrub"),             {},                     wxT("Tools")           },
+   { wxT("Device"),            wxT("Scrub"),           wxT("Tools")           },
 
    // Bottom dock
-   { wxT("TimeSignature"),     {},                     {},               }, 
-   { wxT("Snapping"),          wxT("TimeSignature"),   {},               },
-   { wxT("Time"),              wxT("Snapping"),        {}                },
+   { wxT("Control"),           {},                     {}                },
+   { wxT("Time"),              wxT("Control"),         {}                },
    { wxT("Selection"),         wxT("Time"),            {}                },
-
-// DA: Transcription Toolbar not docked, by default.
+   { wxT("Snapping"),          wxT("Selection"),       {}                },
+   { wxT("StackedMeters"),     wxT("Snapping"),        {}                },
+   { wxT("Operations"),        wxT("StackedMeters"),   {}                },
+   { wxT("TimeSignature"),     {},                     wxT("Control")    },
 #ifdef EXPERIMENTAL_DA
    { wxT("Transcription"),     {},                     {}                },
 #else
-   { wxT("Transcription"),     wxT("Selection"),       {}                },
+   { wxT("Transcription"),     wxT("TimeSignature"),   {}                },
 #endif
-
-   { wxT("Operations"),        wxT("Transcription"),   {}                },
 
    // Hidden by default in bottom dock
    { wxT("SpectralSelection"), {},                     {}                },
@@ -750,6 +741,8 @@ void ToolManager::ReadConfig()
       useLegacyDock = true;
 
 
+   bool upgradeBottomRow = false;
+
    // Load and apply settings for each bar
    ForEach([&](ToolBar *bar){
       //wxPoint Center = mParent->GetPosition() + (mParent->GetSize() * 0.33);
@@ -772,6 +765,8 @@ void ToolManager::ReadConfig()
          gPrefs->Read( wxT("DockV2"), &dock, -1);
 
       const bool found = (dock != -1);
+      if (ndx == wxT("StackedMeters"))
+         upgradeBottomRow = !found;
       if (found)
          someFound = true;
       if (!found)
@@ -905,6 +900,28 @@ void ToolManager::ReadConfig()
       bar->SetVisible(false );
       bar->GetDock()->Dock(bar, false);
       bar->Expose(false);
+   }
+
+   if (someFound && upgradeBottomRow) {
+      // Upgrade the old bottom-dock positions once. Keep other toolbars in
+      // their saved docks and preserve the visibility of the existing bars.
+      auto &configuration = mBotDock->GetConfiguration();
+      ToolBar *previous = nullptr;
+      for (const auto *id : {wxT("Control"), wxT("Time"), wxT("Selection"),
+            wxT("Snapping"), wxT("StackedMeters"), wxT("Operations")}) {
+         auto *bar = GetToolBar(id);
+         if (!bar || bar->GetDock() != mBotDock || !bar->IsVisible())
+            continue;
+         configuration.Remove(bar);
+         ToolBarConfiguration::Position position{previous, nullptr};
+         position.adopt = false;
+         if (bar->GetSection() == wxT("Operations") &&
+             bar->GetSize().x > bar->GetInitialWidth())
+            bar->SetSize(bar->GetInitialWidth(), toolbarTriple);
+         configuration.Insert(bar, position);
+         previous = bar;
+      }
+      mBotDock->Updated();
    }
 
    toolbarsGroup.Reset();

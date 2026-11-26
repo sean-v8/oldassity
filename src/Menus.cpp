@@ -393,7 +393,7 @@ void MenuCreator::CreateMenusAndCommands(AudacityProject &project)
          {wxT("/Analyze/Analyzers/Windows"), wxT("ContrastAnalyser,PlotSpectrum")},
          {wxT("/Transport/Basic"), wxT("Play,Record,Scrubbing,Cursor")},
          {wxT("/View/Other/Toolbars/Toolbars/Other"), wxT(
-"ShowTransportTB,ShowToolsTB,ShowRecordMeterTB,ShowPlayMeterTB,"
+"ShowTransportTB,ShowToolsTB,ShowStackedMetersTB,"
 //"ShowMeterTB,"
 "ShowMixerTB,"
 "ShowEditTB,ShowTranscriptionTB,ShowScrubbingTB,ShowDeviceTB,ShowSelectionTB,"

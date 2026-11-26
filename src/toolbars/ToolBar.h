@@ -63,6 +63,8 @@ DECLARE_EXPORTED_EVENT_TYPE(AUDACITY_DLL_API, EVT_TOOLBAR_UPDATED, -1);
 //
 #define toolbarGap 1
 
+inline constexpr int toolbarTriple = 3 * toolbarSingle + 2 * toolbarGap;
+
 // How may pixels padding each side of a floating toolbar
 enum { ToolBarFloatMargin = 1 };
 
@@ -148,7 +150,6 @@ public:
    
    // Utility function for certain resizable toolbars.
    // Allows them to dock at normal or double size.
-   wxSize GetSmartDockedSize();
 
  public:
    static

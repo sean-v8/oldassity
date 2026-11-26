@@ -38,9 +38,9 @@ public:
    void EnableDisableButtons() override {};
    void UpdatePrefs() override;
    void RegenerateTooltips() override {};
-   int GetInitialWidth() override { return 285; }
+   int GetInitialWidth() override { return 310; }
    int GetMinToolbarWidth() override {return 50;}
-   int GetMinToolbarHeight() override { return 2 * toolbarSingle + toolbarGap; }
+   int GetMinToolbarHeight() override { return toolbarTriple; }
    void SetToDefaultSize() override;
    wxSize GetDockedSize() override;
    void SetDocked(ToolDock *dock, bool pushed) override;
@@ -61,7 +61,7 @@ private:
    float mDigitRatio;
    bool mSettingInitialSize;
 
-   static const int minDigitH = 27;
+   static const int minDigitH = 32;
    static const int maxDigitH = 100;
 
    Observer::Subscription mFormatChangedToFitValueSubscription;

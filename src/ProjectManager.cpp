@@ -782,10 +782,7 @@ void ProjectManager::OnTimer(wxTimerEvent& WXUNUSED(event))
 {
    auto &project = mProject;
    auto &projectAudioIO = ProjectAudioIO::Get( project );
-   auto meterToolBars = MeterToolBar::GetToolBars( project );
-
-   for (auto& meterToolBar : meterToolBars)
-      meterToolBar.get().UpdateControls();
+   MeterToolBar::Get(project).UpdateControls();
    
    auto gAudioIO = AudioIO::Get();
    // gAudioIO->GetNumCaptureChannels() should only be positive
