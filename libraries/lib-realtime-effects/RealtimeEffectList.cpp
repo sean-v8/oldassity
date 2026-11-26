@@ -26,6 +26,7 @@ std::unique_ptr<ClientData::Cloneable<>> RealtimeEffectList::Clone() const
    auto result = std::make_unique<RealtimeEffectList>();
    for (auto &pState : mStates)
       result->mStates.push_back(pState);
+   result->mPresetId = mPresetId;
    result->SetActive(this->IsActive());
    result->SetProjectEffectsEnabled(AreProjectEffectsEnabled());
    return result;
@@ -173,6 +174,7 @@ void RealtimeEffectList::ReplaceInactiveChain(RealtimeEffectList &source)
    {
       LockGuard guard{mLock};
       mStates.swap(source.mStates);
+      mPresetId.swap(source.mPresetId);
    }
    Publish({RealtimeEffectListMessage::Type::Reset, {}, {}, {}});
 }
@@ -254,6 +256,8 @@ bool RealtimeEffectList::HandleXMLTag(
       for (auto &[attr, value] : attrs) {
          if (attr == activeAttribute)
             SetActive(value.Get<bool>());
+         else if (attr == "presetid")
+            mPresetId = value.ToWString();
          else if (attr == "projecteffects")
             SetProjectEffectsEnabled(value.Get<bool>());
       }
@@ -275,6 +279,8 @@ void RealtimeEffectList::WriteXML(XMLWriter &xmlFile) const
 {
    xmlFile.StartTag(XMLTag());
    xmlFile.WriteAttr(activeAttribute, IsActive());
+   if (!mPresetId.empty())
+      xmlFile.WriteAttr("presetid", mPresetId);
    if (!AreProjectEffectsEnabled())
       xmlFile.WriteAttr("projecteffects", false);
    for (const auto & state : mStates)
@@ -289,6 +295,7 @@ void RealtimeEffectList::RestoreUndoRedoState(AudacityProject &project)
    {
       LockGuard lock{current.mLock};
       current.mStates.swap(restored);
+      current.mPresetId = mPresetId;
       current.mActive.store(IsActive(), std::memory_order_relaxed);
       current.SetProjectEffectsEnabled(AreProjectEffectsEnabled());
    }

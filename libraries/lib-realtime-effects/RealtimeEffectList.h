@@ -118,6 +118,8 @@ public:
 
    //! Replace the chain while its realtime engine is inactive.
    void ReplaceInactiveChain(RealtimeEffectList &source);
+   const wxString &GetPresetId() const { return mPresetId; }
+   void SetPresetId(wxString id) { mPresetId = std::move(id); }
 
    //! Report the position of a state in the list
    std::optional<size_t> FindState(
@@ -166,6 +168,7 @@ public:
 
 private:
    States mStates;
+   wxString mPresetId;
 
    using LockGuard = std::lock_guard<Lock>;
    mutable Lock mLock;
