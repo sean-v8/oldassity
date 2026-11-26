@@ -16,16 +16,17 @@ Paul Licameli split from Mix.cpp
 #include "StretchingSequence.h"
 #include "WaveTrack.h"
 
+#include <algorithm>
+#include <limits>
+
 using WaveTrackConstArray = std::vector < std::shared_ptr < const WaveTrack > >;
 
 //TODO-MB: wouldn't it make more sense to DELETE the time track after 'mix and render'?
-TrackListHolder MixAndRender(const TrackIterRange<const WaveTrack> &trackRange,
-   const Mixer::WarpOptions &warpOptions,
-   const wxString &newTrackName,
-   WaveTrackFactory *trackFactory,
-   double rate, sampleFormat format,
-   double startTime, double endTime,
-   const std::function<BasicUI::ProgressResult(double, double)> &reportProgress)
+std::unique_ptr<MixRenderJob> MixRenderJob::Begin(
+   const TrackIterRange<const WaveTrack> &trackRange,
+   const Mixer::WarpOptions &warpOptions, const wxString &newTrackName,
+   WaveTrackFactory &trackFactory, double rate, sampleFormat format,
+   double startTime, double endTime)
 {
    if (trackRange.empty())
       return {};
@@ -96,7 +97,7 @@ TrackListHolder MixAndRender(const TrackIterRange<const WaveTrack> &trackRange,
       oneinput = true;
    // only one input track (either 1 mono or one linked stereo pair)
 
-   auto result = trackFactory->Create(mono ? 1 : 2, *first);
+   auto result = trackFactory.Create(mono ? 1 : 2, *first);
    auto mix = static_cast<WaveTrack*>(*result->begin());
    mix->SetPan(0);
    mix->SetGain(1.0f);
@@ -115,59 +116,84 @@ TrackListHolder MixAndRender(const TrackIterRange<const WaveTrack> &trackRange,
       endTime = mixEndTime;
    }
 
-   Mixer mixer(move(waveArray),
+   auto mixer = std::make_unique<Mixer>(move(waveArray),
       // Throw to abort mix-and-render if read fails:
       true, warpOptions,
       startTime, endTime, mono ? 1 : 2, maxBlockLen, false,
       rate, format);
+   return std::unique_ptr<MixRenderJob>(new MixRenderJob(
+      std::move(result), std::move(mixer), format, startTime, endTime));
+}
+
+MixRenderJob::MixRenderJob(TrackListHolder result, std::unique_ptr<Mixer> mixer,
+   sampleFormat format, double startTime, double endTime)
+   : mResult{ std::move(result) }, mMixer{ std::move(mixer) },
+     mFormat{ format }, mStartTime{ startTime }, mEndTime{ endTime }
+{
+}
+
+bool MixRenderJob::ProcessNext(size_t maxSamples)
+{
+   assert(mResult && mMixer && maxSamples > 0);
+   const auto blockLen = mMixer->Process(std::min(maxSamples, mMixer->BufferSize()));
+   if (blockLen == 0)
+      return false;
+
+   auto &mix = static_cast<WaveTrack &>(**mResult->begin());
+   for (auto channel : mix.Channels()) {
+      auto buffer = mMixer->GetBuffer(channel->ReallyGetChannelIndex());
+      channel->AppendBuffer(buffer, mFormat, blockLen, 1,
+         mMixer->EffectiveFormat());
+   }
+   return true;
+}
+
+double MixRenderJob::Elapsed()
+{
+   return mMixer->MixGetCurrentTime() - mStartTime;
+}
+
+TrackListHolder MixRenderJob::Finish()
+{
+   assert(mResult && mMixer);
+   auto &mix = static_cast<WaveTrack &>(**mResult->begin());
+   mix.Flush();
+   RealtimeEffectList::Get(mix).Clear();
+   mMixer.reset();
+   return std::move(mResult);
+}
+
+TrackListHolder MixAndRender(const TrackIterRange<const WaveTrack> &trackRange,
+   const Mixer::WarpOptions &warpOptions,
+   const wxString &newTrackName,
+   WaveTrackFactory *trackFactory,
+   double rate, sampleFormat format,
+   double startTime, double endTime,
+   const std::function<BasicUI::ProgressResult(double, double)> &reportProgress)
+{
+   auto job = MixRenderJob::Begin(trackRange, warpOptions, newTrackName,
+      *trackFactory, rate, format, startTime, endTime);
+   if (!job)
+      return {};
 
    using namespace BasicUI;
    auto updateResult = ProgressResult::Success;
    {
-      auto effectiveFormat = mixer.EffectiveFormat();
-      auto pProgress = reportProgress ? nullptr :
+      auto progress = reportProgress ? nullptr :
          MakeProgress(XO("Mix and Render"), XO("Mixing and rendering tracks"));
-
-      while (updateResult == ProgressResult::Success) {
-         auto blockLen = mixer.Process();
-
-         if (blockLen == 0)
-            break;
-
-         for(auto channel : mix->Channels())
-         {
-            auto buffer = mixer.GetBuffer(channel->ReallyGetChannelIndex());
-            channel->AppendBuffer(buffer, format, blockLen, 1, effectiveFormat);
-         }
-
-         const auto elapsed = mixer.MixGetCurrentTime() - startTime;
-         const auto total = endTime - startTime;
-         updateResult = reportProgress
-            ? reportProgress(elapsed, total)
-            : pProgress->Poll(elapsed, total);
+      while (updateResult == ProgressResult::Success &&
+             job->ProcessNext(std::numeric_limits<size_t>::max())) {
+         const auto elapsed = job->Elapsed();
+         const auto total = job->Duration();
+         updateResult = reportProgress ? reportProgress(elapsed, total) :
+            progress->Poll(elapsed, total);
       }
    }
-   mix->Flush();
+
    if (updateResult == ProgressResult::Cancelled ||
        updateResult == ProgressResult::Failed)
       return {};
-   else {
-#if 0
-   int elapsedMS = wxGetElapsedTime();
-   double elapsedTime = elapsedMS * 0.001;
-   double maxTracks = totalTime / (elapsedTime / numWaves);
-
-   // Note: these shouldn't be translated - they're for debugging
-   // and profiling only.
-   wxPrintf("      Tracks: %d\n", numWaves);
-   wxPrintf("  Mix length: %f sec\n", totalTime);
-   wxPrintf("Elapsed time: %f sec\n", elapsedTime);
-   wxPrintf("Max number of tracks to mix in real time: %f\n", maxTracks);
-#endif
-      RealtimeEffectList::Get(*mix).Clear();
-   }
-
-   return result;
+   return job->Finish();
 }
 
 #include "RealtimeEffectList.h"

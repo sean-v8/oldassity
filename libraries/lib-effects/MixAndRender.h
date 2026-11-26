@@ -54,6 +54,37 @@ EFFECTS_API TrackListHolder MixAndRender(
    double startTime, double endTime,
    const std::function<BasicUI::ProgressResult(double, double)> &reportProgress = {});
 
+// A render whose bounded processing steps can be scheduled by a project
+// without opening a progress dialog or pumping the window event loop.
+// The caller keeps the source tracks alive and stable until the job ends.
+class EFFECTS_API MixRenderJob final
+{
+public:
+   static std::unique_ptr<MixRenderJob> Begin(
+      const TrackIterRange<const WaveTrack> &tracks,
+      const Mixer::WarpOptions &warpOptions, const wxString &newTrackName,
+      WaveTrackFactory &factory, double rate, sampleFormat format,
+      double startTime, double endTime);
+
+   //! Process up to maxSamples. False means end of input.
+   bool ProcessNext(size_t maxSamples);
+   double Elapsed();
+   double Duration() const { return mEndTime - mStartTime; }
+   //! Return the completed (or deliberately stopped) mix. Call once.
+   TrackListHolder Finish();
+   //! Destroy the job without Finish to discard its detached output.
+
+private:
+   MixRenderJob(TrackListHolder result, std::unique_ptr<Mixer> mixer,
+      sampleFormat format, double startTime, double endTime);
+
+   TrackListHolder mResult;
+   std::unique_ptr<Mixer> mMixer;
+   sampleFormat mFormat;
+   double mStartTime;
+   double mEndTime;
+};
+
 enum ChannelName : int;
 using ChannelNames = const ChannelName *;
 
