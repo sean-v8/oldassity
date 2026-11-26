@@ -1652,19 +1652,26 @@ wxRect ClipParameters::GetClipRect(const ClipTimes& clip,
       static_cast<ZoomInfo::int64>(std::numeric_limits<int>::min());
    constexpr auto edgeRight =
       static_cast<ZoomInfo::int64>(std::numeric_limits<int>::max());
-   const auto left = std::clamp(
+   auto left = std::clamp(
       zoomInfo.TimeToPosition(clip.GetPlayStartTime(), viewRect.x, true),
       edgeLeft, edgeRight);
-   const auto right = std::clamp(
+   auto right = std::clamp(
       zoomInfo.TimeToPosition(
          clip.GetPlayEndTime() - GetBlankSpaceBeforePlayEndTime(clip) +
             clipEndingAdjustment,
          viewRect.x, true),
       edgeLeft, edgeRight);
+   // Even when both endpoints fit in int, their distance can overflow
+   // wxRect at sample-level zoom. Only the visible part is needed then.
+   if (right - left > std::numeric_limits<int>::max()) {
+      left = std::max(left, static_cast<ZoomInfo::int64>(viewRect.GetLeft()));
+      right = std::min(right,
+         static_cast<ZoomInfo::int64>(viewRect.GetRight()) + 1);
+      if (right <= left)
+         return {};
+   }
    if (right >= left)
    {
-      // after clamping we can expect that left and right
-      // are small enough to be put into int
       return wxRect(
          static_cast<int>(left), viewRect.y,
          std::max(1, static_cast<int>(right - left)), viewRect.height);

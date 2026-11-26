@@ -22,7 +22,6 @@ Paul Licameli split from TrackPanel.cpp
 #include "WaveTrack.h"
 #include "tracks/playabletrack/wavetrack/ui/WaveTrackControls.h"
 #include "TrackPanelMouseEvent.h"
-#include "TrackPanelAx.h"
 #include "tracks/ui/ChannelView.h"
 
 HitTestPreview TrackPanelResizeHandle::HitPreview(bool bLinked)
@@ -60,18 +59,14 @@ UIHandle::Result TrackPanelResizeHandle::Click(
    const TrackPanelMouseEvent &evt, AudacityProject *pProject )
 {
    using namespace RefreshCode;
-   if ((mTopEdge && evt.event.LeftDown()) ||
-       (evt.event.LeftDClick() && mMode != IsResizingBetweenLinkedTracks)) {
+   if (evt.event.LeftDClick() && mMode != IsResizingBetweenLinkedTracks) {
       auto channel = FindChannel();
       if (!channel)
          return Cancelled;
       if (auto *track = dynamic_cast<WaveTrack *>(&GetTrack(*channel))) {
-         TrackFocus::Get(*pProject).Set(track);
-         if (evt.event.LeftDClick()) {
-            WaveTrackControls::CycleHeight(*track);
-            ProjectHistory::Get(*pProject).ModifyState(false);
-            return Cancelled | RefreshAll | FixScrollbars;
-         }
+         WaveTrackControls::CycleHeight(*track);
+         ProjectHistory::Get(*pProject).ModifyState(false);
+         return Cancelled | RefreshAll | FixScrollbars;
       }
    }
    if (evt.event.LeftDClick() && mMode == IsResizingBetweenLinkedTracks) {

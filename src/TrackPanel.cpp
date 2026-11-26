@@ -91,6 +91,7 @@ is time to refresh some aspect of the screen.
 #include "../images/Cursors.h"
 
 #include <algorithm>
+#include <utility>
 
 #include <wx/dc.h>
 #include <wx/dcclient.h>
@@ -728,7 +729,12 @@ void TrackPanel::OnMouseEvent(wxMouseEvent & event)
    }
 
 
-   if (event.ButtonUp()) {
+   if (event.ButtonDown() || event.ButtonDClick()) {
+      const auto cell = FindCell(event.m_x, event.m_y).pCell;
+      mResizeEdgeClick = dynamic_cast<TrackPanelResizerCell *>(cell.get()) != nullptr;
+   }
+
+   if (event.ButtonUp() && !std::exchange(mResizeEdgeClick, false)) {
       //EnsureVisible should be called after processing the up-click.
       this->CallAfter( [this, event]{
          const auto foundCell = FindCell(event.m_x, event.m_y);

@@ -662,6 +662,36 @@ void OnPanCenter(const CommandContext &context)
    DoPanTracks( project, 0.0);
 }
 
+void OnCenterAllTrackPans(const CommandContext &context)
+{
+   auto &project = context.project;
+   bool changed = false;
+   for (auto *track : TrackList::Get(project).Any<WaveTrack>()) {
+      if (track->GetPan() != 0.0f) {
+         track->SetPan(0.0f);
+         changed = true;
+      }
+   }
+   if (changed)
+      ProjectHistory::Get(project).PushState(
+         XO("Centered pan on all audio tracks"), XO("Center All Track Pans"));
+}
+
+void OnResetAllTrackGains(const CommandContext &context)
+{
+   auto &project = context.project;
+   bool changed = false;
+   for (auto *track : TrackList::Get(project).Any<WaveTrack>()) {
+      if (track->GetGain() != 1.0f) {
+         track->SetGain(1.0f);
+         changed = true;
+      }
+   }
+   if (changed)
+      ProjectHistory::Get(project).PushState(
+         XO("Reset all audio track gains to 0 dB"), XO("Reset All Track Gains"));
+}
+
 void OnAlignNoSync(const CommandContext &context)
 {
    auto &project = context.project;
@@ -1122,8 +1152,12 @@ BaseItemSharedPtr TracksMenu()
                Options{}.LongName( XO("Pan Right") ) ),
             Command( wxT("PanCenter"), XXO("&Center"), OnPanCenter,
                EditableTracksSelectedFlag(),
-               Options{}.LongName( XO("Pan Center") ) )
-         )
+               Options{}.LongName( XO("Pan Center") ) ),
+            Command( wxT("CenterAllTrackPans"), XXO("Center &All Track Pans"),
+               OnCenterAllTrackPans, WaveTracksExistFlag() )
+         ),
+         Command( wxT("ResetAllTrackGains"), XXO("Reset All Track &Gains to 0 dB"),
+            OnResetAllTrackGains, WaveTracksExistFlag() )
       ),
 
       Section( "",
