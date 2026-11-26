@@ -8,6 +8,7 @@
 #include "QualitySettings.h"
 #include "TimeTrack.h"
 #include "ToolManager.h"
+#include "ToolDock.h"
 #include "Track.h"
 #include "WaveTrack.h"
 
@@ -57,7 +58,7 @@ OperationsToolBar *OperationsToolBar::Get(AudacityProject &project)
 }
 
 OperationsToolBar::OperationsToolBar(AudacityProject &project)
-   : ToolBar(project, XO("Operations"), ID())
+   : ToolBar(project, XO("Operations"), ID(), true)
 {
    Bind(wxEVT_TIMER, &OperationsToolBar::OnTimer, this, mTimer.GetId());
 }
@@ -70,18 +71,35 @@ OperationsToolBar::~OperationsToolBar()
 void OperationsToolBar::Populate()
 {
    mStatus = safenew wxStaticText(this, wxID_ANY, wxString{},
-      wxDefaultPosition, wxSize(200, -1), wxST_ELLIPSIZE_END);
+      wxDefaultPosition, wxSize(100, -1), wxST_ELLIPSIZE_END);
    mProgress = safenew wxGauge(this, wxID_ANY, progressRange, wxDefaultPosition,
-      wxSize(82, -1));
+      wxSize(32, 12));
    mProgress->SetName(XO("Operation progress").Translation());
    mCancel = safenew wxButton(this, wxID_ANY, XO("Cancel").Translation(),
-      wxDefaultPosition, wxDefaultSize, wxBU_EXACTFIT);
+      wxDefaultPosition, wxSize(-1, toolbarSingle), wxBU_EXACTFIT);
    mCancel->Bind(wxEVT_BUTTON, [this](wxCommandEvent &) { Cancel(); });
 
    Add(mStatus, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 4);
-   Add(mProgress, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 4);
+   Add(mProgress, 1, wxALIGN_CENTER_VERTICAL | wxRIGHT, 4);
    Add(mCancel, 0, wxALIGN_CENTER_VERTICAL);
+
+   mStatus->Bind(wxEVT_LEFT_DCLICK, [this](wxMouseEvent &) {
+      if (auto *dock = GetDock()) {
+         const auto width = dock->GetClientSize().x - GetPosition().x - 3;
+         if (width >= GetMinToolbarWidth()) {
+            SetSize(width, toolbarSingle);
+            Layout();
+            Updated();
+         }
+      }
+   });
    UpdateDisplay();
+}
+
+int OperationsToolBar::GetMinToolbarWidth()
+{
+   // Leave room for the grabber, resize grip and padding in the base toolbar.
+   return 160 + (mCancel ? mCancel->GetBestSize().x : 0);
 }
 
 void OperationsToolBar::EnableDisableButtons()
@@ -102,12 +120,14 @@ void OperationsToolBar::UpdateDisplay()
          const auto remaining = std::ceil(time * (duration - elapsed) / elapsed);
          if (remaining >= 0 && remaining <= std::numeric_limits<int>::max()) {
             const auto seconds = static_cast<int>(remaining);
-            label = XO("Mix and Render · %s left").Format(
+            label = XO("Mix · %s left").Format(
                wxString::Format("%d:%02d", seconds / 60, seconds % 60));
          }
       }
    }
    mStatus->SetLabel(label.Translation());
+   mStatus->SetToolTip(XO("%s\nDouble-click to widen to the dock edge.")
+      .Format(label).Translation());
    mProgress->SetValue(mRender ? mRender->progress : 0);
    EnableDisableButtons();
 }

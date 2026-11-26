@@ -26,6 +26,9 @@ public:
    bool ShownByDefault() const override { return false; }
    DockID DefaultDockID() const override { return BotDockID; }
    void Populate() override;
+   int GetInitialWidth() override { return 320; }
+   int GetMinToolbarWidth() override;
+   wxSize GetDockedSize() override { return { GetSize().x, toolbarSingle }; }
    void Repaint(wxDC *) override {}
    void EnableDisableButtons() override;
    void RegenerateTooltips() override {}
