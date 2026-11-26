@@ -35,6 +35,9 @@ public:
 
    const LV2PortStates &GetPortStates() const { return mPortStates; }
 
+   // LSP preset metadata is exchanged on the UI thread and survives editor recreation.
+   std::vector<uint8_t> &EditorPresetState() { return mEditorPresetState; }
+
    bool ProcessInitialize(EffectSettings &settings, double sampleRate,
       ChannelNames chanMap) override;
    size_t ProcessBlock(EffectSettings &settings,
@@ -75,6 +78,7 @@ private:
    LV2InstanceFeaturesList mFeatures;
    const LV2Ports &mPorts;
    LV2PortStates mPortStates{ mPorts };
+   std::vector<uint8_t> mEditorPresetState;
 
    //! Holds lv2 library state for destructive processing
    std::unique_ptr<LV2Wrapper> mMaster;

@@ -188,6 +188,7 @@ struct LV2Editor::IdleGraph {
 
    LV2_URID presetStateType{};
    bool editorSentPresetState{};
+   bool restorePresetOnFirstUpdate{};
    std::vector<LV2_URID> fftGraphs;
    LV2InstanceFeaturesList features;
    LV2PortStates states;
@@ -423,8 +424,11 @@ bool LV2Editor::BuildFancy(
        pluginUri.rfind("http://lsp-plug.in/plugins/lv2/para_equalizer_", 0) == 0) {
       auto graph = std::make_unique<IdleGraph>(
          mFeatures, mPorts, GetSettings(settings), mSampleRate, pluginUri);
-      if (graph->wrapper)
+      if (graph->wrapper) {
+         graph->restorePresetOnFirstUpdate = !mInstance.EditorPresetState().empty();
+         graph->editorSentPresetState = graph->restorePresetOnFirstUpdate;
          mpIdleGraph = std::move(graph);
+      }
    }
 
    // Reassign the sample rate, which is pointed to by options, which are
@@ -965,6 +969,15 @@ void LV2Editor::UpdateGraphicalUI()
 #endif
 
    if (!mExternalUIClosed) {
+      if (mpIdleGraph && mpIdleGraph->restorePresetOnFirstUpdate) {
+         const auto &preset = mInstance.EditorPresetState();
+         suil_instance_port_event(mUI.mSuilInstance.get(),
+            mPortUIStates.mControlOut->mpPort->mIndex,
+            static_cast<uint32_t>(preset.size()), LV2Symbols::urid_EventTransfer,
+            preset.data());
+         mpIdleGraph->restorePresetOnFirstUpdate = false;
+      }
+
       const auto sendAtoms = [&](const LV2AtomPortStatePtr &atomState,
                                  const IdleGraph *idleGraph = nullptr) {
          if (atomState)
@@ -1162,8 +1175,12 @@ void LV2Editor::suil_port_write(uint32_t port_index,
       if (atomPortState && port_index == atomPortState->mpPort->mIndex) {
          atomPortState->ReceiveFromDialog(buffer, buffer_size);
          if (mpIdleGraph) {
-            if (mpIdleGraph->IsPresetState(buffer, buffer_size))
+            if (!mpIdleGraph->restorePresetOnFirstUpdate &&
+                mpIdleGraph->IsPresetState(buffer, buffer_size)) {
+               const auto *bytes = static_cast<const uint8_t *>(buffer);
+               mInstance.EditorPresetState().assign(bytes, bytes + buffer_size);
                mpIdleGraph->editorSentPresetState = true;
+            }
             mpIdleGraph->uiStates.mControlIn->ReceiveFromDialog(buffer, buffer_size);
          }
       }
