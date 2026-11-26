@@ -15,12 +15,19 @@
 #include "../ProjectWindow.h"
 
 #include <algorithm>
+#include <chrono>
+#include <cmath>
+#include <limits>
 #include <wx/button.h>
 #include <wx/gauge.h>
 #include <wx/stattext.h>
 
 namespace {
-constexpr int renderDelayMs = 5;
+using Clock = std::chrono::steady_clock;
+constexpr auto renderBudget = std::chrono::milliseconds{12};
+constexpr int nextSliceMs = 1;
+constexpr int blockedPollMs = 100;
+constexpr int progressRange = 10000;
 constexpr size_t samplesPerStep = 16384;
 }
 
@@ -33,6 +40,9 @@ struct OperationsToolBar::Render {
    size_t sourceCount{};
    int waveColor{};
    int progress{};
+   Clock::duration processingTime{};
+   Clock::time_point previousSliceEnd{};
+   Clock::time_point lastDisplay{};
    bool complete{};
 };
 
@@ -60,8 +70,8 @@ OperationsToolBar::~OperationsToolBar()
 void OperationsToolBar::Populate()
 {
    mStatus = safenew wxStaticText(this, wxID_ANY, wxString{},
-      wxDefaultPosition, wxSize(165, -1), wxST_ELLIPSIZE_END);
-   mProgress = safenew wxGauge(this, wxID_ANY, 100, wxDefaultPosition,
+      wxDefaultPosition, wxSize(200, -1), wxST_ELLIPSIZE_END);
+   mProgress = safenew wxGauge(this, wxID_ANY, progressRange, wxDefaultPosition,
       wxSize(82, -1));
    mProgress->SetName(XO("Operation progress").Translation());
    mCancel = safenew wxButton(this, wxID_ANY, XO("Cancel").Translation(),
@@ -82,8 +92,21 @@ void OperationsToolBar::EnableDisableButtons()
 
 void OperationsToolBar::UpdateDisplay()
 {
-   const auto label = !mRender ? XO("No active operation") :
+   auto label = !mRender ? XO("No active operation") :
       mRender->complete ? XO("Ready to add mix") : XO("Mix and Render");
+   if (mRender && !mRender->complete) {
+      const auto duration = mRender->job->Duration();
+      const auto elapsed = mRender->job->Elapsed();
+      const auto time = std::chrono::duration<double>(mRender->processingTime).count();
+      if (elapsed > 0 && duration > elapsed && time >= 0.5) {
+         const auto remaining = std::ceil(time * (duration - elapsed) / elapsed);
+         if (remaining >= 0 && remaining <= std::numeric_limits<int>::max()) {
+            const auto seconds = static_cast<int>(remaining);
+            label = XO("Mix and Render · %s left").Format(
+               wxString::Format("%d:%02d", seconds / 60, seconds % 60));
+         }
+      }
+   }
    mStatus->SetLabel(label.Translation());
    mProgress->SetValue(mRender ? mRender->progress : 0);
    EnableDisableButtons();
@@ -124,7 +147,7 @@ void OperationsToolBar::StartMixRender()
    mRender = std::move(render);
    UpdateDisplay();
    ToolManager::Get(mProject).Expose(ID(), true);
-   mTimer.StartOnce(renderDelayMs);
+   mTimer.StartOnce(nextSliceMs);
 }
 
 void OperationsToolBar::Cancel()
@@ -148,22 +171,37 @@ void OperationsToolBar::OnTimer(wxTimerEvent &)
    }
    // An existing modal operation may yield timer events mid-command.
    if (!window.IsEnabled() || mProject.mbBusyImporting) {
-      mTimer.StartOnce(50);
+      mRender->previousSliceEnd = {};
+      mTimer.StartOnce(blockedPollMs);
       return;
    }
 
    GuardedCall<void>([&] {
       auto &render = *mRender;
       if (!render.complete) {
-         render.complete = !render.job->ProcessNext(samplesPerStep);
+         const auto start = Clock::now();
+         const auto deadline = start + renderBudget;
+         do {
+            render.complete = !render.job->ProcessNext(samplesPerStep);
+         } while (!render.complete && Clock::now() < deadline);
+
+         const auto now = Clock::now();
+         const auto previousEnd = render.previousSliceEnd;
+         render.processingTime += now - (previousEnd == Clock::time_point{} ? start : previousEnd);
+         render.previousSliceEnd = now;
          const auto duration = render.job->Duration();
-         render.progress = render.complete ? 100 : duration > 0.0 ?
-            static_cast<int>(100 * std::clamp(render.job->Elapsed() / duration, 0.0, 1.0)) : 0;
-         UpdateDisplay();
+         const auto fraction = duration > 0.0
+            ? std::clamp(render.job->Elapsed() / duration, 0.0, 1.0) : 0.0;
+         if (render.complete || now - render.lastDisplay >= std::chrono::milliseconds{100}) {
+            render.progress = render.complete ? progressRange :
+               static_cast<int>(progressRange * fraction);
+            render.lastDisplay = now;
+            UpdateDisplay();
+         }
       }
 
       if (!render.complete || AudioIOBusyPred(mProject)) {
-         mTimer.StartOnce(render.complete ? 50 : renderDelayMs);
+         mTimer.StartOnce(render.complete ? blockedPollMs : nextSliceMs);
          return;
       }
 
