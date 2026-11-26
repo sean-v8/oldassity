@@ -1182,6 +1182,12 @@ bool AudioIO::AllocateBuffers(
 
    auto &policy = mPlaybackSchedule.GetPolicy();
    auto times = policy.SuggestedBufferTimes(mPlaybackSchedule);
+   mPlaybackCallbackFrames.store(0, std::memory_order_relaxed);
+   mPlaybackQueueStarved.store(false, std::memory_order_relaxed);
+   mResponsivePlaybackBatch = times.adaptToCallbackSize && mNumCaptureChannels == 0
+      ? std::max<long>(1, lrint(mRate *
+           PlaybackPolicy::Duration{policy.SleepInterval(mPlaybackSchedule)}.count()))
+      : 0;
 
    //
    // The (audio) stream has been opened successfully (assuming we tried
@@ -1942,32 +1948,30 @@ void AudioIO::FillPlayBuffers()
    // ALL buffers, and advance the global time by that much.
    auto nAvailable = GetCommonlyFreePlayback();
 
-   // Don't fill the buffers at all unless we can do
-   // at least mPlaybackSamplesToCopy.  This improves performance
-   // by not always trying to process tiny chunks, eating the
-   // CPU unnecessarily.
-   if (nAvailable < mPlaybackSamplesToCopy)
-      return;
+   auto batch = mPlaybackSamplesToCopy;
+   auto queueTarget = mPlaybackQueueMinimum;
+   const auto callbackFrames = mPlaybackCallbackFrames.load(std::memory_order_relaxed);
+   if (mResponsivePlaybackBatch && callbackFrames &&
+       !mPlaybackQueueStarved.load(std::memory_order_relaxed)) {
+      // Reported device latency can include audio the device already owns.
+      // Keep one callback's worth ready plus two producer polling intervals.
+      const auto responsiveTarget = callbackFrames + 2 * mResponsivePlaybackBatch;
+      if (responsiveTarget < queueTarget) {
+         queueTarget = responsiveTarget;
+         batch = std::min(batch, mResponsivePlaybackBatch);
+      }
+   }
 
-   // More than mPlaybackSamplesToCopy might be copied:
-   // May produce a larger amount when initially priming the buffer, or
-   // perhaps again later in play to avoid underfilling the queue and
-   // falling behind the real-time demand on the consumer side in the
-   // callback.
    const auto ready = GetCommonlyWrittenForPlayback();
-   // Track controls are applied before the master effects, so overfilling
-   // this queue delays audible changes to mute, solo, and gain. Refill
-   // only once playback reaches the hardware-based queue target.
-   if (ready > mPlaybackQueueMinimum)
+   // Avoid producing extra pre-mixed audio while the queue already has enough.
+   if (ready > queueTarget || nAvailable < batch)
       return;
 
-   auto GetNeeded = [&]() -> size_t {
-      // Note that reader might concurrently consume between loop passes below
-      // So this might not be nondecreasing
-      auto nReady = GetCommonlyWrittenForPlayback();
-      return mPlaybackQueueMinimum - std::min(mPlaybackQueueMinimum, nReady);
+   const auto GetNeeded = [&] {
+      const auto nReady = GetCommonlyWrittenForPlayback();
+      return queueTarget - std::min(queueTarget, nReady);
    };
-   auto nNeeded = mPlaybackQueueMinimum - ready;
+   auto nNeeded = queueTarget - ready;
 
    // wxASSERT( nNeeded <= nAvailable );
 
@@ -1987,7 +1991,7 @@ void AudioIO::FillPlayBuffers()
    while (true) {
       // Limit maximum buffer size (increases performance)
       auto available = std::min( nAvailable,
-         std::max( nNeeded, mPlaybackSamplesToCopy ) );
+         std::max( nNeeded, batch ) );
 
       // After each loop pass or after break
       Finally Do{ Flush };
@@ -2750,6 +2754,15 @@ bool AudioIoCallback::FillOutputBuffers(
       CallbackCheckCompletion(mCallbackReturn, 0);
       mLastPlaybackTimeMillis = ::wxGetUTCTimeMillis();
       return false;
+   }
+
+   if (mResponsivePlaybackBatch) {
+      const auto previous = mPlaybackCallbackFrames.load(std::memory_order_relaxed);
+      if (framesPerBuffer > previous)
+         mPlaybackCallbackFrames.store(framesPerBuffer, std::memory_order_relaxed);
+      // After a short read, keep the conservative target for this stream.
+      if (previous && toGet < framesPerBuffer)
+         mPlaybackQueueStarved.store(true, std::memory_order_relaxed);
    }
 
    // JKC: The original code attempted to be faster by doing nothing on silenced audio.

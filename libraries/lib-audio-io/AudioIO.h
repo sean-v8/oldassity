@@ -291,6 +291,11 @@ public:
    size_t              mHardwarePlaybackLatencyFrames {};
    /// Occupancy of the queue we try to maintain, with bigger batches if needed
    size_t              mPlaybackQueueMinimum;
+   // Reset before each stream. The callback publishes block size and starvation
+   // to the producer without changing the ring buffer capacity.
+   size_t mResponsivePlaybackBatch{};
+   std::atomic<size_t> mPlaybackCallbackFrames{0};
+   std::atomic<bool> mPlaybackQueueStarved{false};
 
    double              mMinCaptureSecsToCopy;
    /*! Read by a worker thread but unchanging during playback */

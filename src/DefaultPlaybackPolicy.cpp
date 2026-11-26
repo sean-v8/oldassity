@@ -56,7 +56,7 @@ DefaultPlaybackPolicy::SuggestedBufferTimes(PlaybackSchedule &)
    // Shorter times than in the default policy so that responses to changes of
    // loop region or speed slider don't lag too much
    using namespace std::chrono;
-   return { 0.05s, 0.05s, 0.25s };
+   return { 0.05s, 0.05s, 0.25s, true };
 }
 
 bool DefaultPlaybackPolicy::RevertToOldDefault(const PlaybackSchedule &schedule) const

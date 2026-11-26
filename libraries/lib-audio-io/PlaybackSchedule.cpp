@@ -39,7 +39,7 @@ PlaybackPolicy::SuggestedBufferTimes(PlaybackSchedule &)
 #if 1
    // Shorter times than in the default policy so that responses, to changes of
    // loop region or speed slider or other such controls, don't lag too much
-   return { 0.05s, 0.05s, 0.25s };
+   return { 0.05s, 0.05s, 0.25s, true };
 #else
 /*
 The old values, going very far back.

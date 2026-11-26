@@ -90,6 +90,7 @@ public:
       Duration batchSize; //!< Try to put at least this much into the ring buffer in each pass
       Duration latency; //!< Try not to let ring buffer contents fall below this
       Duration ringBufferDelay; //!< Length of ring buffer
+      bool adaptToCallbackSize = false; //!< Reduce queued audio during ordinary playback
    };
    //! Provide hints for construction of playback RingBuffer objects
    virtual BufferTimes SuggestedBufferTimes(PlaybackSchedule &schedule);
