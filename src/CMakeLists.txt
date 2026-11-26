@@ -1469,7 +1469,8 @@ else()
                FILES_MATCHING PATTERN "*.so*" )
 
       install( FILES "${_INTDIR}/audacity.desktop"
-               DESTINATION "${_DATADIR}/applications" )
+               DESTINATION "${_DATADIR}/applications"
+               RENAME oldassity.desktop )
       install( FILES "${topdir}/LICENSE.txt" "${topdir}/README.md"
                DESTINATION "${_DATADIR}/doc/${AUDACITY_NAME}" )
       install( FILES "${_SRCDIR}/audacity.xml"

@@ -18,7 +18,8 @@ list( APPEND PIXMAPS
 if( NOT CMAKE_SYSTEM_NAME MATCHES "Darwin" )
    if( NOT "${CMAKE_GENERATOR}" MATCHES "Visual Studio*")
       install( FILES "${_SRCDIR}/audacity.svg"
-               DESTINATION "${_DATADIR}/icons/hicolor/scalable/apps" )
+               DESTINATION "${_DATADIR}/icons/hicolor/scalable/apps"
+               RENAME oldassity.svg )
       install( DIRECTORY "${_SRCDIR}/icons/"
                DESTINATION "${_DATADIR}/icons/hicolor"
                FILES_MATCHING PATTERN "*.png" )
