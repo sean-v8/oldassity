@@ -110,7 +110,7 @@ void LV2Editor::UI::Destroy()
 // nonempty block. This instance and its buffers belong only to the UI thread.
 struct LV2Editor::IdleGraph {
    IdleGraph(const LV2FeaturesList &base, const LV2Ports &ports,
-      const LV2EffectSettings &settings, double sampleRate)
+      const LV2EffectSettings &settings, double sampleRate, std::string_view pluginUri)
       : features{ base }, states{ ports }, uiStates{ states, ports }
    {
       if (!features.mOk || !uiStates.mControlIn || !uiStates.mControlOut)
@@ -127,7 +127,14 @@ struct LV2Editor::IdleGraph {
       for (auto &state : states.mCVPortStates)
          state.mBuffer.reinit(features.mBlockSize, state.mpPort->mIsInput);
 
-      lv2_atom_forge_init(&forge, base.URIDMapFeature());
+      auto *map = base.URIDMapFeature();
+      lv2_atom_forge_init(&forge, map);
+      meshType = map->map(map->handle, "http://lsp-plug.in/types/lv2/types#Mesh");
+      const auto portPrefix = std::string(pluginUri) + "/ports#";
+      for (const auto *graph : { "ifg", "ofg", "rfg" })
+         for (const auto *channel : { "", "_l", "_r", "_m", "_s" })
+            fftGraphs.push_back(map->map(map->handle,
+               (portPrefix + graph + channel).c_str()));
       wrapper = LV2Wrapper::Create(features, ports, states, controls,
          sampleRate, &outputs);
       if (!wrapper)
@@ -152,6 +159,18 @@ struct LV2Editor::IdleGraph {
       uiStates.mControlOut->ReceiveFromInstance();
    }
 
+   bool IsFFTMesh(const LV2_Atom &atom) const
+   {
+      if ((atom.type != forge.Object && atom.type != forge.Blank) ||
+          atom.size < sizeof(LV2_Atom_Object_Body))
+         return false;
+      const auto &body = reinterpret_cast<const LV2_Atom_Object &>(atom).body;
+      return body.otype == meshType &&
+         std::find(fftGraphs.begin(), fftGraphs.end(), body.id) != fftGraphs.end();
+   }
+
+   LV2_URID meshType{};
+   std::vector<LV2_URID> fftGraphs;
    LV2InstanceFeaturesList features;
    LV2PortStates states;
    LV2PortUIStates uiStates;
@@ -385,7 +404,7 @@ bool LV2Editor::BuildFancy(
    if (mpOutputs &&
        pluginUri.rfind("http://lsp-plug.in/plugins/lv2/para_equalizer_", 0) == 0) {
       auto graph = std::make_unique<IdleGraph>(
-         mFeatures, mPorts, GetSettings(settings), mSampleRate);
+         mFeatures, mPorts, GetSettings(settings), mSampleRate, pluginUri);
       if (graph->wrapper)
          mpIdleGraph = std::move(graph);
    }
@@ -914,9 +933,13 @@ void LV2Editor::UpdateGraphicalUI()
       return;
 
    if (!mExternalUIClosed) {
-      const auto sendAtoms = [&](const LV2AtomPortStatePtr &atomState) {
+      const auto sendAtoms = [&](const LV2AtomPortStatePtr &atomState,
+                                 const IdleGraph *idleGraph = nullptr) {
          if (atomState)
             atomState->SendToDialog([&](const LV2_Atom *atom, uint32_t size){
+               // Hold the last live spectrum while the silent EQ updates its curve.
+               if (idleGraph && idleGraph->IsFFTMesh(*atom))
+                  return;
                suil_instance_port_event(mUI.mSuilInstance.get(),
                   atomState->mpPort->mIndex, size,
                   LV2Symbols::urid_EventTransfer, atom);
@@ -928,7 +951,7 @@ void LV2Editor::UpdateGraphicalUI()
          mPortUIStates.mControlOut->SendToDialog([](const LV2_Atom *, uint32_t){});
          mpIdleGraph->Refresh(GetSettings(mAccess.Get()));
          SendControlChanges(&mpIdleGraph->outputs);
-         sendAtoms(mpIdleGraph->uiStates.mControlOut);
+         sendAtoms(mpIdleGraph->uiStates.mControlOut, mpIdleGraph.get());
       }
       else
          sendAtoms(mPortUIStates.mControlOut);
