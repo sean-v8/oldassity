@@ -16,6 +16,7 @@
 #include <wx/weakref.h>
 #include <wx/event.h>
 #include <wx/string.h>
+#include <wx/timer.h>
 
 #include "ClientData.h"
 #include "Observer.h"
@@ -24,6 +25,7 @@ class RealtimeEffectState;
 class Track;
 class EffectUIHost;
 class EffectInstance;
+struct EffectSettings;
 
 class AudacityProject;
 
@@ -42,6 +44,8 @@ public:
    // Pass non-null to cause autosave
    void Hide(AudacityProject* project = nullptr);
    void Toggle(AudacityProject& project);
+   void RestoreSettings(const EffectSettings &settings);
+   static void FlushPendingSettingsHistory(AudacityProject &project);
 
    void UpdateTrackData(const Track& track);
 
@@ -53,7 +57,8 @@ public:
 
 private:
    void UpdateTitle();
-   void SaveClosedEditor(AudacityProject &project);
+   bool CheckpointSettings(AudacityProject &project);
+   void OnSettingsTimer(wxTimerEvent &event);
    
    RealtimeEffectState& mRealtimeEffectState;
 
@@ -63,6 +68,9 @@ private:
    wxString mTrackName;
    std::optional<wxString> mOpeningSettings;
    bool mParameterChanged{};
+   bool mInPlaceHistory{};
+   bool mRestoringSettings{};
+   wxTimer mSettingsTimer{ this };
    AudacityProject *mpProject{};
 
    Observer::Subscription mProjectWindowDestroyedSubscription;

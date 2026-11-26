@@ -10,6 +10,8 @@
 **********************************************************************/
 #include "RealtimeEffectStateUI.h"
 
+#include <wx/utils.h>
+
 #include <cassert>
 #include <utility>
 #include <vector>
@@ -70,10 +72,7 @@ struct RealtimeEffectSettingsRestorer final : UndoStateExtension {
          const auto restored = DescribeSettings(*state, snapshot);
          if (previous && restored && *previous == *restored)
             continue;
-         // Give the editor a chance to commit native state before replacing
-         // its settings. Hide without a project to suppress a new undo entry.
-         RealtimeEffectStateUI::Get(*state).Hide();
-         state->RestoreSettings(snapshot);
+         RealtimeEffectStateUI::Get(*state).RestoreSettings(snapshot);
       }
    }
 
@@ -95,6 +94,8 @@ END_EVENT_TABLE()
 RealtimeEffectStateUI::RealtimeEffectStateUI(RealtimeEffectState& state)
     : mRealtimeEffectState(state)
 {
+   Bind(wxEVT_TIMER, &RealtimeEffectStateUI::OnSettingsTimer, this,
+      mSettingsTimer.GetId());
 }
 
 RealtimeEffectStateUI::~RealtimeEffectStateUI()
@@ -164,6 +165,7 @@ void RealtimeEffectStateUI::Show(AudacityProject& project)
 
    mEffectUIHost->PushEventHandler(this);
    mpProject = &project;
+   mInPlaceHistory = mEffectUIHost->GetEditor()->SupportsInPlaceSettingsHistory();
 
    mProjectWindowDestroyedSubscription = projectWindow.Subscribe(
       [this, &project](ProjectWindowDestroyedMessage) {
@@ -174,9 +176,14 @@ void RealtimeEffectStateUI::Show(AudacityProject& project)
 
    mParameterChangedSubscription = mEffectUIHost->GetEditor()->Subscribe(
       [this](auto) {
-         if (mpProject) {
+         if (mpProject && !mRestoringSettings) {
             mParameterChanged = true;
-            UndoManager::Get(*mpProject).MarkUnsaved();
+            if (mInPlaceHistory) {
+               // Collect a gesture's port writes and wait for the button release.
+               mSettingsTimer.StartOnce(25);
+            }
+            else
+               UndoManager::Get(*mpProject).MarkUnsaved();
          }
       });
 }
@@ -247,8 +254,53 @@ void RealtimeEffectStateUI::AutoSave(AudacityProject &project)
    ProjectHistory::AutoSave::Call(project);
 }
 
-void RealtimeEffectStateUI::SaveClosedEditor(AudacityProject &project)
+void RealtimeEffectStateUI::FlushPendingSettingsHistory(AudacityProject &project)
 {
+   const auto flush = [&](RealtimeEffectState &state, bool) {
+      auto &ui = Get(state);
+      if (ui.mInPlaceHistory && ui.mParameterChanged && ui.mpProject == &project)
+         ui.CheckpointSettings(project);
+   };
+   RealtimeEffectList::Get(project).Visit(flush);
+   for (auto *track : TrackList::Get(project).Any<WaveTrack>())
+      RealtimeEffectList::Get(*track).Visit(flush);
+}
+
+void RealtimeEffectStateUI::OnSettingsTimer(wxTimerEvent &)
+{
+   if (!mpProject || !mParameterChanged)
+      return;
+
+   const auto mouse = wxGetMouseState();
+   if (mouse.LeftIsDown() || mouse.MiddleIsDown() || mouse.RightIsDown()) {
+      mSettingsTimer.StartOnce(25);
+      return;
+   }
+
+   CheckpointSettings(*mpProject);
+}
+
+void RealtimeEffectStateUI::RestoreSettings(const EffectSettings &settings)
+{
+   if (!mEffectUIHost || !mInPlaceHistory) {
+      // Other native editors can write their final settings during close.
+      Hide();
+      mRealtimeEffectState.RestoreSettings(settings);
+      return;
+   }
+
+   mSettingsTimer.Stop();
+   mRestoringSettings = true;
+   auto reset = finally([&] { mRestoringSettings = false; });
+   mRealtimeEffectState.RestoreSettings(settings);
+   mEffectUIHost->TransferDataToWindow();
+   mOpeningSettings = DescribeSettings(mRealtimeEffectState, settings);
+   mParameterChanged = false;
+}
+
+bool RealtimeEffectStateUI::CheckpointSettings(AudacityProject &project)
+{
+   mSettingsTimer.Stop();
    auto access = mRealtimeEffectState.GetAccess();
    access->Flush();
    const auto settings = DescribeSettings(mRealtimeEffectState, access->Get());
@@ -262,8 +314,9 @@ void RealtimeEffectStateUI::SaveClosedEditor(AudacityProject &project)
       ProjectHistory::Get(project).PushState(
          description, XO("Change Realtime Effect Settings"));
    }
-   else
-      AutoSave(project);
+   mOpeningSettings = settings;
+   mParameterChanged = false;
+   return changed;
 }
 
 void RealtimeEffectStateUI::OnClose(wxCloseEvent & evt)
@@ -280,6 +333,7 @@ void RealtimeEffectStateUI::OnClose(wxCloseEvent & evt)
 
    mEffectUIHost = {};
    mParameterChangedSubscription.Reset();
-   if (pProject)
-      SaveClosedEditor(*pProject);
+   mSettingsTimer.Stop();
+   if (pProject && !CheckpointSettings(*pProject))
+      AutoSave(*pProject);
 }

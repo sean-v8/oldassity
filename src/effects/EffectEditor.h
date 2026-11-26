@@ -51,6 +51,8 @@ public:
     */
    virtual bool UpdateUI();
 
+   virtual bool SupportsInPlaceSettingsHistory() const { return false; }
+
    // Optional settings dialog scoped to this editor and its effect instance.
    virtual bool HasOptions() const { return false; }
    virtual void ShowOptions() {}

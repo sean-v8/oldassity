@@ -23,6 +23,7 @@
 #include "SampleBlock.h"
 #include "../commands/CommandContext.h"
 #include "../commands/CommandManager.h"
+#include "../effects/RealtimeEffectStateUI.h"
 #include "TimeWarper.h"
 #include "../prefs/PrefsDialog.h"
 #include "../prefs/TracksBehaviorsPrefs.h"
@@ -182,13 +183,15 @@ void OnUndo(const CommandContext &context)
    auto &undoManager = UndoManager::Get( project );
    auto &window = ProjectWindow::Get( project );
 
-   if (!ProjectHistory::Get( project ).UndoAvailable()) {
-      AudacityMessageBox( XO("Nothing to undo") );
+   // can't undo while dragging
+   if (trackPanel.IsMouseCaptured()) {
       return;
    }
 
-   // can't undo while dragging
-   if (trackPanel.IsMouseCaptured()) {
+   RealtimeEffectStateUI::FlushPendingSettingsHistory(project);
+
+   if (!ProjectHistory::Get( project ).UndoAvailable()) {
+      AudacityMessageBox( XO("Nothing to undo") );
       return;
    }
 
@@ -213,12 +216,15 @@ void OnRedo(const CommandContext &context)
    auto &undoManager = UndoManager::Get( project );
    auto &window = ProjectWindow::Get( project );
 
-   if (!ProjectHistory::Get( project ).RedoAvailable()) {
-      AudacityMessageBox( XO("Nothing to redo") );
-      return;
-   }
    // Can't redo whilst dragging
    if (trackPanel.IsMouseCaptured()) {
+      return;
+   }
+
+   RealtimeEffectStateUI::FlushPendingSettingsHistory(project);
+
+   if (!ProjectHistory::Get( project ).RedoAvailable()) {
+      AudacityMessageBox( XO("Nothing to redo") );
       return;
    }
 

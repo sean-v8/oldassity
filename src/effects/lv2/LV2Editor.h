@@ -64,6 +64,7 @@ public:
 
    bool ValidateUI() override;
    bool UpdateUI() override;
+   bool SupportsInPlaceSettingsHistory() const override { return mpIdleGraph != nullptr; }
    bool IsGraphicalUI() override;
    void Disconnect() override;
 

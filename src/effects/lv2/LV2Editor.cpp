@@ -780,6 +780,8 @@ bool LV2Editor::UpdateUI()
             ++index;
          }
       }
+      if (SupportsInPlaceSettingsHistory())
+         Publish({});
       return true;
    }
 
