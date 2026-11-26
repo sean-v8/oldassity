@@ -125,7 +125,7 @@ void OperationsToolBar::UpdateDisplay()
       const auto end = mRender->complete ? mRender->finished : Clock::now();
       elapsedText = formatTime(std::chrono::duration_cast<std::chrono::seconds>(
          end - mRender->started).count());
-      label = XO("%s · %s elapsed").Format(label.Translation(), elapsedText);
+      label = XO("%s · %s").Format(label.Translation(), elapsedText);
    }
    if (mRender && !mRender->complete) {
       const auto duration = mRender->job->Duration();
@@ -135,7 +135,7 @@ void OperationsToolBar::UpdateDisplay()
          const auto remaining = std::ceil(time * (duration - elapsed) / elapsed);
          if (remaining >= 0 && remaining <= std::numeric_limits<int>::max()) {
             const auto seconds = static_cast<int>(remaining);
-            label = XO("Mix and Render · %s elapsed · %s left").Format(
+            label = XO("Mix and Render · %s<%s").Format(
                elapsedText, formatTime(seconds));
          }
       }
