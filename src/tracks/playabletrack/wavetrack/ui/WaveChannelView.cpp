@@ -1648,35 +1648,25 @@ wxRect ClipParameters::GetClipRect(const ClipTimes& clip,
       CalculateAdjustmentForZoomLevel(pixelsPerSecond, showIndividualSamples);
    if (outShowSamples != nullptr)
       *outShowSamples = showIndividualSamples;
-   constexpr auto edgeLeft =
-      static_cast<ZoomInfo::int64>(std::numeric_limits<int>::min());
-   constexpr auto edgeRight =
-      static_cast<ZoomInfo::int64>(std::numeric_limits<int>::max());
-   auto left = std::clamp(
-      zoomInfo.TimeToPosition(clip.GetPlayStartTime(), viewRect.x, true),
-      edgeLeft, edgeRight);
-   auto right = std::clamp(
-      zoomInfo.TimeToPosition(
-         clip.GetPlayEndTime() - GetBlankSpaceBeforePlayEndTime(clip) +
-            clipEndingAdjustment,
-         viewRect.x, true),
-      edgeLeft, edgeRight);
-   // Even when both endpoints fit in int, their distance can overflow
-   // wxRect at sample-level zoom. Only the visible part is needed then.
-   if (right - left > std::numeric_limits<int>::max()) {
-      left = std::max(left, static_cast<ZoomInfo::int64>(viewRect.GetLeft()));
-      right = std::min(right,
-         static_cast<ZoomInfo::int64>(viewRect.GetRight()) + 1);
-      if (right <= left)
-         return {};
-   }
-   if (right >= left)
-   {
-      return wxRect(
-         static_cast<int>(left), viewRect.y,
-         std::max(1, static_cast<int>(right - left)), viewRect.height);
-    }
-    return wxRect();
+   const auto left =
+      zoomInfo.TimeToPosition(clip.GetPlayStartTime(), viewRect.x, true);
+   const auto right = zoomInfo.TimeToPosition(
+      clip.GetPlayEndTime() - GetBlankSpaceBeforePlayEndTime(clip) +
+         clipEndingAdjustment, viewRect.x, true);
+
+   // Keep rectangles within drawing and hit-test range at every zoom level.
+   // Leave room outside the viewport so a clipped edge stays offscreen,
+   // including its rounded corners and trim hit area.
+   constexpr ZoomInfo::int64 edgePadding = 32;
+   const auto visibleLeft = std::max(left,
+      static_cast<ZoomInfo::int64>(viewRect.GetLeft()) - edgePadding);
+   const auto visibleRight = std::min(right,
+      static_cast<ZoomInfo::int64>(viewRect.GetRight()) + 1 + edgePadding);
+   if (visibleRight < visibleLeft)
+      return {};
+
+   return wxRect(static_cast<int>(visibleLeft), viewRect.y,
+      std::max(1, static_cast<int>(visibleRight - visibleLeft)), viewRect.height);
 }
 
 void WaveChannelView::Reparent(const std::shared_ptr<Track> &parent)

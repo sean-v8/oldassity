@@ -257,6 +257,8 @@ void WaveTrackAffordanceControls::Draw(TrackPanelDrawingContext& context, const 
                 auto interval = *it;
                 auto affordanceRect
                    = ClipParameters::GetClipRect(*interval->GetClip(0), zoomInfo, rect);
+                if (!affordanceRect.Intersects(rect))
+                   continue;
 
                 if(!WaveChannelView::ClipDetailsVisible(*interval->GetClip(0), zoomInfo, rect))
                 {
