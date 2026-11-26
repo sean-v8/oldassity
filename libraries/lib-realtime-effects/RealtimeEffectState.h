@@ -93,6 +93,9 @@ public:
 
    const EffectSettings &GetSettings() const { return mMainSettings.settings; }
 
+   //! Restore a project history snapshot on the main thread with audio stopped.
+   void RestoreSettings(EffectSettings settings);
+
    //! Test only in the main thread
    bool IsEnabled() const noexcept;
 

@@ -628,6 +628,24 @@ bool RealtimeEffectState::ProcessEnd()
    return result;
 }
 
+void RealtimeEffectState::RestoreSettings(EffectSettings settings)
+{
+   assert(!mInitialized);
+   const auto wasEnabled = IsEnabled();
+   if (GetAccessState()) {
+      Access access{ *this };
+      access.Set(std::move(settings), nullptr);
+      access.Flush();
+   }
+   else
+      mMainSettings.settings = std::move(settings);
+
+   if (wasEnabled != IsEnabled())
+      Publish(IsEnabled()
+         ? RealtimeEffectStateChange::EffectOn
+         : RealtimeEffectStateChange::EffectOff);
+}
+
 bool RealtimeEffectState::IsEnabled() const noexcept
 {
    return mMainSettings.settings.extra.GetActive();

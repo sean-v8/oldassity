@@ -11,9 +11,11 @@
 #pragma once
 
 // wx/weakref.h misses this include
+#include <optional>
 #include <type_traits>
 #include <wx/weakref.h>
 #include <wx/event.h>
+#include <wx/string.h>
 
 #include "ClientData.h"
 #include "Observer.h"
@@ -51,6 +53,7 @@ public:
 
 private:
    void UpdateTitle();
+   void SaveClosedEditor(AudacityProject &project);
    
    RealtimeEffectState& mRealtimeEffectState;
 
@@ -58,6 +61,8 @@ private:
 
    TranslatableString mEffectName;
    wxString mTrackName;
+   std::optional<wxString> mOpeningSettings;
+   bool mParameterChanged{};
    AudacityProject *mpProject{};
 
    Observer::Subscription mProjectWindowDestroyedSubscription;
