@@ -24,7 +24,8 @@ TrackListHolder MixAndRender(const TrackIterRange<const WaveTrack> &trackRange,
    const wxString &newTrackName,
    WaveTrackFactory *trackFactory,
    double rate, sampleFormat format,
-   double startTime, double endTime)
+   double startTime, double endTime,
+   const std::function<BasicUI::ProgressResult(double, double)> &reportProgress)
 {
    if (trackRange.empty())
       return {};
@@ -124,8 +125,8 @@ TrackListHolder MixAndRender(const TrackIterRange<const WaveTrack> &trackRange,
    auto updateResult = ProgressResult::Success;
    {
       auto effectiveFormat = mixer.EffectiveFormat();
-      auto pProgress = MakeProgress(XO("Mix and Render"),
-         XO("Mixing and rendering tracks"));
+      auto pProgress = reportProgress ? nullptr :
+         MakeProgress(XO("Mix and Render"), XO("Mixing and rendering tracks"));
 
       while (updateResult == ProgressResult::Success) {
          auto blockLen = mixer.Process();
@@ -139,8 +140,11 @@ TrackListHolder MixAndRender(const TrackIterRange<const WaveTrack> &trackRange,
             channel->AppendBuffer(buffer, format, blockLen, 1, effectiveFormat);
          }
 
-         updateResult = pProgress->Poll(
-            mixer.MixGetCurrentTime() - startTime, endTime - startTime);
+         const auto elapsed = mixer.MixGetCurrentTime() - startTime;
+         const auto total = endTime - startTime;
+         updateResult = reportProgress
+            ? reportProgress(elapsed, total)
+            : pProgress->Poll(elapsed, total);
       }
    }
    mix->Flush();

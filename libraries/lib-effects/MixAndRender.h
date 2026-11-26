@@ -12,6 +12,7 @@ Paul Licameli split from Mix.h
 #ifndef __AUDACITY_MIX_AND_RENDER_H
 #define __AUDACITY_MIX_AND_RENDER_H
 
+#include "BasicUI.h"
 #include "Mix.h"
 #include "SampleFormat.h"
 #include "Track.h"
@@ -19,6 +20,7 @@ Paul Licameli split from Mix.h
 class WaveTrack;
 class WaveTrackFactory;
 
+#include <functional>
 #include <memory>
 
 /** @brief Mixes together all input tracks, applying any envelopes, amplitude
@@ -37,6 +39,10 @@ class WaveTrackFactory;
  * @param newTrackName used only when there is more than one input track (one
  * mono channel or a stereo pair); else the unique track's name is copied
  *
+ * @param reportProgress optional progress and cancellation callback, called
+ * synchronously with elapsed and total render time in seconds. Supplying it
+ * lets the caller own progress presentation; otherwise use the standard dialog.
+ *
  * @pre `trackRange` iterates over leaders only
  */
 EFFECTS_API TrackListHolder MixAndRender(
@@ -45,7 +51,8 @@ EFFECTS_API TrackListHolder MixAndRender(
    const wxString &newTrackName,
    WaveTrackFactory *factory,
    double rate, sampleFormat format,
-   double startTime, double endTime);
+   double startTime, double endTime,
+   const std::function<BasicUI::ProgressResult(double, double)> &reportProgress = {});
 
 enum ChannelName : int;
 using ChannelNames = const ChannelName *;
