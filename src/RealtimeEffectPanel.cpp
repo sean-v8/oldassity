@@ -1153,7 +1153,7 @@ RealtimeEffectPanel::RealtimeEffectPanel(
    auto *MasterList = safenew ThemedWindowWrapper<RealtimeEffectListWindow>(this, wxID_ANY);
    MasterList->SetBackgroundColorIndex(clrMedium);
    mMasterList = MasterList;
-   vSizer->Add(mMasterList, 1, wxEXPAND);
+   vSizer->Add(mMasterList, 0, wxEXPAND);
    vSizer->Add(safenew wxStaticLine(this), 0, wxEXPAND | wxLEFT | wxRIGHT, 6);
 
    mTrackTitle = addStackHeader(XO("Track effects power"), {}, mTrackPower);
@@ -1175,6 +1175,17 @@ RealtimeEffectPanel::RealtimeEffectPanel(
    UpdatePowerButtons();
 
    SetSizerAndFit(vSizer.release());
+
+   Bind(wxEVT_SIZE, [this](wxSizeEvent &event) {
+      event.Skip();
+
+      // Keep the track stack usable when a long master stack needs to scroll.
+      const int contentHeight = mMasterList->GetSizer()->CalcMin().y;
+      const int height = std::min(contentHeight, GetClientSize().y / 2);
+      if (mMasterList->GetMinSize().y != height)
+         mMasterList->SetMinSize(wxSize(-1, height));
+      Layout();
+   });
 
    Bind(wxEVT_CHAR_HOOK, &RealtimeEffectPanel::OnCharHook, this);
    mTrackListChanged = TrackList::Get(mProject).Subscribe([this](const TrackListEvent& evt) {

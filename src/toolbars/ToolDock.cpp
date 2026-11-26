@@ -23,6 +23,7 @@
 
 
 #include "ToolDock.h"
+#include "MeterToolBar.h"
 
 #include <wx/tokenzr.h>
 
@@ -534,6 +535,9 @@ void ToolDock::VisitLayout(LayoutVisitor &visitor,
    ToolBar *lastRoot {};
    ToolBar *lastWrappedRoot {};
 
+   const auto playMeter = MeterToolBar::PlayID();
+   const auto recordMeter = MeterToolBar::RecordID();
+
    // Process all docked and visible toolbars
    for ( const auto &place : this->GetConfiguration() )
    {
@@ -634,6 +638,23 @@ void ToolDock::VisitLayout(LayoutVisitor &visitor,
       // descendant bars and is remembered in the layout array.
       int x = cpos.x + tw;
       newItem.rect = wxRect{ x, cpos.y, width - x, th };
+
+      // Adjacent stacked meters can share the space to their right.
+      if (newPosition.below && th == toolbarSingle + toolbarGap &&
+          ((section == playMeter && newPosition.below->GetSection() == recordMeter) ||
+           (section == recordMeter && newPosition.below->GetSection() == playMeter)))
+      {
+         auto upper = std::find_if(layout, next - 1, [&](const Item &item) {
+            return item.section == newPosition.below->GetSection();
+         });
+         if (upper != next - 1 && !upper->lastWrappedChild &&
+             upper->rect.height == th && upper->rect.y + th == cpos.y)
+         {
+            x = std::max(x, upper->rect.x);
+            newItem.rect = wxRect{ x, upper->rect.y, width - x, 2 * th };
+            upper->rect.width = 0;
+         }
+      }
    }
 
    if (visitor.ShouldVisitSpaces()) {

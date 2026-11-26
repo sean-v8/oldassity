@@ -100,6 +100,7 @@ void TimeToolBar::Populate()
    // Calculate the width to height ratio
    wxSize digitSize = mAudioTime->GetDigitSize();
    mDigitRatio = (float)digitSize.x / digitSize.y;
+   mAudioTime->SetDigitSize(minDigitH * mDigitRatio, minDigitH);
 
    // During initialization, we need to bypass some resizing to prevent the "best size"
    // from being used as we want to ensure the saved size is used instead. See SetDocked()
@@ -111,6 +112,7 @@ void TimeToolBar::Populate()
    mFormatChangedToFitValueSubscription = mAudioTime->Subscribe(
       [this](auto)
       {
+         SetResizingLimits();
          wxSizeEvent e;
          OnSize(e);
       });
@@ -141,7 +143,8 @@ void TimeToolBar::SetToDefaultSize()
    SetAudioTimeFormat(NumericConverterFormats::HoursMinsSecondsFormat());
 
    // Set the default size
-   SetSize(GetInitialWidth(), 48);
+   SetSize(GetInitialWidth(), GetMinToolbarHeight());
+   SetResizingLimits();
 
    // Inform others the toobar has changed
    Updated();
@@ -149,18 +152,7 @@ void TimeToolBar::SetToDefaultSize()
 
 wxSize TimeToolBar::GetDockedSize()
 {
-   wxSize sz = GetSize();
-
-   // Anything less than a single height bar becomes single height
-   if (sz.y <= toolbarSingle) {
-      sz.y = toolbarSingle;
-   }
-   // Otherwise it will be a double height bar
-   else {
-      sz.y = 2 * toolbarSingle + toolbarGap;
-   }
-
-   return sz;
+   return wxSize(GetSize().x, GetMinToolbarHeight());
 }
 
 void TimeToolBar::SetDocked(ToolDock *dock, bool pushed)
@@ -175,7 +167,7 @@ void TimeToolBar::SetDocked(ToolDock *dock, bool pushed)
 
    // When moving from floater to dock, fit to toolbar since the resizer will
    // be mispositioned
-   if (dock) {
+   if (dock && GetSizer()) {
       // During initialization, the desired size is already set, so do not
       // override it with the "best size". See OnUpdate for further info.
       if (!mSettingInitialSize) {
@@ -229,13 +221,14 @@ void TimeToolBar::ResizingDone()
 
 void TimeToolBar::SetResizingLimits()
 {
+   if (!GetSizer())
+      return;
+
    // Reset limits
    SetMinSize(wxDefaultSize);
    SetMaxSize(wxDefaultSize);
 
-   // If docked we use the current bar height since it's always a single or double height
-   // toolbar.  For floaters, single height toolbar is the minimum height.
-   int minH = IsDocked() ? GetSize().y : toolbarSingle;
+   const int minH = GetMinToolbarHeight();
 
    // Get the content size given the smallest digit height we allow
    wxSize minSize = ComputeSizing(minDigitH);
@@ -273,6 +266,8 @@ void TimeToolBar::SetResizingLimits()
    // And finally set them both
    SetMinSize(minSize);
    SetMaxSize(maxSize);
+   if (GetSize().x < minSize.x || GetSize().y < minSize.y)
+      SetSize(wxMax(GetSize().x, minSize.x), wxMax(GetSize().y, minSize.y));
 }
 
 // Called when the format drop downs is changed.
@@ -317,7 +312,7 @@ void TimeToolBar::OnSize(wxSizeEvent &evt)
    evt.Skip();
 
    // Can fire before we're ready
-   if (!mAudioTime) {
+   if (!mAudioTime || !GetSizer()) {
       return;
    }
 
@@ -344,10 +339,10 @@ void TimeToolBar::OnSize(wxSizeEvent &evt)
    }
    // In all other cases, we need to decrease current size to fit within new size
    else if (sizerBR.x < timeBR.x || sizerBR.y < timeBR.y) {
-      do {
+      while (h > minDigitH && (sizerBR.x < timeBR.x || sizerBR.y < timeBR.y)) {
          h--;
          timeBR = ComputeSizing(h);
-      } while (h >= minDigitH && (sizerBR.x < timeBR.x || sizerBR.y < timeBR.y));
+      }
    }
 
    if (h != mAudioTime->GetDigitSize().y) {

@@ -227,6 +227,8 @@ void SelectionBar::AddTime(
    auto pCtrl = safenew NumericTextCtrl(FormatterContext::ProjectContext(mProject),
       this, id, NumericConverterType_TIME(), formatName, 0.0);
 
+   pCtrl->SetDigitSize(14, 23);
+
    pCtrl->Bind(
       wxEVT_TEXT,
       [this, id](auto& evt) { ModifySelection(id, evt.GetInt() != 0); });
@@ -636,6 +638,13 @@ void SelectionBar::UpdateTimeControlsFormat(const NumericFormatSymbol& format)
                   format :
                   NumericConverterFormats::GetBestDurationFormat(format));
    }
+}
+
+void SelectionBar::ResizingDone()
+{
+   // A layout saved with smaller digits may be narrower than the readouts.
+   const auto best = GetBestSize();
+   SetSize(wxMax(GetSize().x, best.x), wxMax(GetSize().y, best.y));
 }
 
 void SelectionBar::FitToTimeControls()
