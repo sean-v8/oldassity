@@ -253,23 +253,23 @@ bool SnapManager::SnapToPoints(Track *currentTrack,
       return true;
    }
 
-   // If several label boundaries share a pixel, prefer the earliest
-   // one at the nearest such pixel. Edges on distinct pixels keep the
-   // existing snap rules.
-   const auto nearestPixelDistance = PixelDiff(t, index);
+   // The ambiguity window is the whole snap tolerance, not a single
+   // pixel. Use the first label boundary in that window as a zoom anchor.
    size_t firstLabel = cnt;
-   wxInt64 labelPixel = 0;
    for (i = left; i <= right; ++i) {
-      if (!dynamic_cast<const LabelTrack *>(mSnapPoints[i].track) ||
-          PixelDiff(t, i) != nearestPixelDistance)
+      const auto track = mSnapPoints[i].track;
+      if (!dynamic_cast<const LabelTrack *>(track))
          continue;
-      const auto pixel = mZoomInfo->TimeToPosition(Get(i));
-      if (firstLabel != cnt && labelPixel == pixel) {
-         *outT = Get(firstLabel);
-         return true;
+      if (track == currentTrack) {
+         firstLabel = i;
+         break;
       }
-      firstLabel = i;
-      labelPixel = pixel;
+      if (firstLabel == cnt)
+         firstLabel = i;
+   }
+   if (firstLabel != cnt) {
+      *outT = Get(firstLabel);
+      return true;
    }
 
    if (Get(right) - Get(left) < mEpsilon)

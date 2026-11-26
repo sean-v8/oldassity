@@ -1376,6 +1376,12 @@ bool LabelTrackView::DoCaptureKey(
       }
    }
    else {
+      // Once label editing ends, let the timeline handle horizontal arrows.
+      if (code == WXK_LEFT || code == WXK_RIGHT ||
+          code == WXK_NUMPAD_LEFT || code == WXK_NUMPAD_RIGHT ||
+          code == WXK_ESCAPE)
+         return false;
+
       bool typeToCreateLabel;
       gPrefs->Read(wxT("/GUI/TypeToCreateLabel"), &typeToCreateLabel, false);
       if (IsGoodLabelFirstKey(event) && typeToCreateLabel) {
@@ -1426,6 +1432,8 @@ unsigned LabelTrackView::KeyDown(
    wxKeyEvent & event, ViewInfo &viewInfo, wxWindow *WXUNUSED(pParent),
    AudacityProject *project)
 {
+   const bool escapingEdit = event.GetKeyCode() == WXK_ESCAPE &&
+      IsValidIndex(mTextEditIndex, *project);
    double bkpSel0 = viewInfo.selectedRegion.t0(),
       bkpSel1 = viewInfo.selectedRegion.t1();
 
@@ -1450,6 +1458,9 @@ unsigned LabelTrackView::KeyDown(
    if (!mTextEditIndex.IsModified()) {
       mUndoLabel.clear();
    }
+
+   if (escapingEdit && !IsValidIndex(mTextEditIndex, *project))
+      TrackPanel::Get(*project).SetFocus();
 
    // Make sure caret is in view
    int x;
