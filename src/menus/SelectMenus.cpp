@@ -16,6 +16,7 @@
 #include "../SelectUtilities.h"
 #include "SyncLock.h"
 #include "../TrackPanel.h"
+#include "../TrackPanelAx.h"
 #include "WaveClip.h"
 #include "WaveTrack.h"
 #include "../LabelTrack.h"
@@ -461,10 +462,36 @@ void OnSelectNone(const CommandContext &context)
    ProjectHistory::Get( project ).ModifyState(false);
 }
 
+std::weak_ptr<Track> mFocusBeforeSelectingAllTracks;
+
 void OnSelectAllTracks(const CommandContext &context)
 {
    auto &project = context.project;
-   SelectUtilities::DoSelectTimeAndTracks( project, false, true );
+   auto &tracks = TrackList::Get(project);
+   if (tracks.Selected().size() != tracks.Any().size())
+      mFocusBeforeSelectingAllTracks =
+         Track::SharedPointer(TrackFocus::Get(project).Get());
+
+   SelectUtilities::DoSelectTimeAndTracks(project, false, true);
+}
+
+void OnSelectOnlyPreviouslyFocusedTrack(const CommandContext &context)
+{
+   auto &project = context.project;
+   auto &tracks = TrackList::Get(project);
+   auto &focus = TrackFocus::Get(project);
+   auto previous = tracks.Lock<Track>(mFocusBeforeSelectingAllTracks);
+   auto *target = previous ? previous.get() : focus.Get();
+   if (!target)
+      return;
+
+   for (auto *track : tracks)
+      track->SetSelected(track == target);
+   mFocusBeforeSelectingAllTracks.reset();
+   focus.Set(target);
+   target->EnsureVisible();
+   ProjectHistory::Get(project).ModifyState(false);
+   TrackPanel::Get(project).Refresh(false);
 }
 
 void OnSelectSyncLockSel(const CommandContext &context)
@@ -962,6 +989,8 @@ BaseItemSharedPtr SelectMenu()
                FN(OnSelectAllTracks),
                TracksExistFlag(),
                wxT("Ctrl+Shift+K") ),
+            Command( wxT("SelPreviouslyFocusedTrack"), XXO("In &Previously Focused Track Only"),
+               FN(OnSelectOnlyPreviouslyFocusedTrack), TracksExistFlag() ),
             Command( wxT("SelSyncLockTracks"), XXO("In All &Sync-Locked Tracks"),
                FN(OnSelectSyncLockSel),
                EditableTracksSelectedFlag() | IsSyncLockedFlag(),

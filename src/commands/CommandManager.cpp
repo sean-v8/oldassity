@@ -277,8 +277,6 @@ const std::vector<NormalizedKeyString> &CommandManager::ExcludedList()
          "Alt+Shift+Up",
          "Alt+Shift+Down",
          "Shift+P",
-         "Alt+Shift+Left",
-         "Alt+Shift+Right",
          "Ctrl+Shift+T",
          //"Command+M",
          //"Option+Command+M",

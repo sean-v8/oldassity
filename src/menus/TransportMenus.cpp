@@ -70,7 +70,7 @@ bool MakeReadyToPlay(AudacityProject &project)
    return true;
 }
 
-void DoMoveToLabel(AudacityProject &project, bool next)
+void DoMoveToLabel(AudacityProject &project, bool next, bool moveSelectionEnd = false)
 {
    auto &tracks = TrackList::Get( project );
    auto &trackFocus = TrackFocus::Get( project );
@@ -97,6 +97,26 @@ void DoMoveToLabel(AudacityProject &project, bool next)
    // If there is a single label track, or there is a label track at or below
    // the focused track
    auto &selectedRegion = ViewInfo::Get( project ).selectedRegion;
+   if (lt && moveSelectionEnd) {
+      const auto &labels = lt->GetLabels();
+      const double end = selectedRegion.t1();
+      const auto boundary = next
+         ? std::upper_bound(labels.begin(), labels.end(), end,
+              [](double time, const LabelStruct &label) { return time < label.getT0(); })
+         : std::lower_bound(labels.begin(), labels.end(), end,
+              [](const LabelStruct &label, double time) { return label.getT0() < time; });
+      if ((next && boundary == labels.end()) ||
+          (!next && boundary == labels.begin()))
+         return;
+
+      const auto &label = *(next ? boundary : std::prev(boundary));
+      selectedRegion.setT1(std::max(selectedRegion.t0(), label.getT0()));
+      window.ScrollIntoView(selectedRegion.t1());
+      window.RedrawProject();
+      ProjectHistory::Get(project).ModifyState(false);
+      trackFocus.MessageForScreenReader(Verbatim(label.title));
+      return;
+   }
    if (lt) {
       int i;
       if (next)
@@ -712,6 +732,16 @@ void OnMoveToNextLabel(const CommandContext &context)
    DoMoveToLabel(project, true);
 }
 
+void OnMoveSelectionEndToPrevLabel(const CommandContext &context)
+{
+   DoMoveToLabel(context.project, false, true);
+}
+
+void OnMoveSelectionEndToNextLabel(const CommandContext &context)
+{
+   DoMoveToLabel(context.project, true, true);
+}
+
 #if 0
 // Legacy handlers, not used as of version 2.3.0
 void OnStopSelect(const CommandContext &context)
@@ -928,7 +958,13 @@ BaseItemSharedPtr ExtraSelectionItems()
          CaptureNotBusyFlag() | TrackPanelHasFocus(), wxT("Alt+Left")),
       Command(wxT("MoveToNextLabel"), XXO("Move to Ne&xt Label"),
          OnMoveToNextLabel,
-         CaptureNotBusyFlag() | TrackPanelHasFocus(), wxT("Alt+Right"))
+         CaptureNotBusyFlag() | TrackPanelHasFocus(), wxT("Alt+Right")),
+      Command(wxT("SelectionEndToPrevLabel"), XXO("Move Selection End to Previous Label"),
+         OnMoveSelectionEndToPrevLabel,
+         CaptureNotBusyFlag() | TrackPanelHasFocus(), wxT("Alt+Shift+Left")),
+      Command(wxT("SelectionEndToNextLabel"), XXO("Move Selection End to Next Label"),
+         OnMoveSelectionEndToNextLabel,
+         CaptureNotBusyFlag() | TrackPanelHasFocus(), wxT("Alt+Shift+Right"))
    ) };
    return items;
 }
