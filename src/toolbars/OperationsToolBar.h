@@ -36,6 +36,7 @@ public:
 private:
    void OnTimer(wxTimerEvent &);
    void UpdateDisplay();
+   bool CanServiceRender() const;
 
    struct Render;
    std::unique_ptr<Render> mRender;

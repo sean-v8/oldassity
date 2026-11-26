@@ -134,17 +134,25 @@ MixRenderJob::MixRenderJob(TrackListHolder result, std::unique_ptr<Mixer> mixer,
 
 bool MixRenderJob::ProcessNext(size_t maxSamples)
 {
+   return ProcessNext(maxSamples, [](auto append) { append(); });
+}
+
+bool MixRenderJob::ProcessNext(size_t maxSamples,
+   const std::function<void(std::function<void()>)> &write)
+{
    assert(mResult && mMixer && maxSamples > 0);
    const auto blockLen = mMixer->Process(std::min(maxSamples, mMixer->BufferSize()));
    if (blockLen == 0)
       return false;
 
-   auto &mix = static_cast<WaveTrack &>(**mResult->begin());
-   for (auto channel : mix.Channels()) {
-      auto buffer = mMixer->GetBuffer(channel->ReallyGetChannelIndex());
-      channel->AppendBuffer(buffer, mFormat, blockLen, 1,
-         mMixer->EffectiveFormat());
-   }
+   write([&] {
+      auto &mix = static_cast<WaveTrack &>(**mResult->begin());
+      for (auto channel : mix.Channels()) {
+         auto buffer = mMixer->GetBuffer(channel->ReallyGetChannelIndex());
+         channel->AppendBuffer(buffer, mFormat, blockLen, 1,
+            mMixer->EffectiveFormat());
+      }
+   });
    return true;
 }
 

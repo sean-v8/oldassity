@@ -68,6 +68,12 @@ public:
 
    //! Process up to maxSamples. False means end of input.
    bool ProcessNext(size_t maxSamples);
+
+   // Process on the caller thread, then synchronously dispatch the detached
+   // track write to the UI thread. The mixer buffers must remain alive.
+   bool ProcessNext(size_t maxSamples,
+      const std::function<void(std::function<void()>)> &write);
+
    double Elapsed();
    double Duration() const { return mEndTime - mStartTime; }
    //! Return the completed (or deliberately stopped) mix. Call once.

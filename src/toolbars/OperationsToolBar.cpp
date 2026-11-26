@@ -6,6 +6,7 @@
 #include "ProjectHistory.h"
 #include "ProjectRate.h"
 #include "QualitySettings.h"
+#include "Sequence.h"
 #include "TimeTrack.h"
 #include "ToolManager.h"
 #include "ToolDock.h"
@@ -16,9 +17,14 @@
 #include "../ProjectWindow.h"
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
+#include <condition_variable>
+#include <exception>
 #include <cmath>
 #include <limits>
+#include <mutex>
+#include <thread>
 #include <wx/button.h>
 #include <wx/gauge.h>
 #include <wx/stattext.h>
@@ -30,6 +36,83 @@ constexpr int nextSliceMs = 1;
 constexpr int blockedPollMs = 100;
 constexpr int progressRange = 10000;
 constexpr size_t samplesPerStep = 16384;
+constexpr size_t workerSamplesPerStep = 65536;
+
+const wxEventTypeTag<wxThreadEvent> workerReady{ wxNewEventType() };
+
+// Exactly one request can be in flight. Its captures can refer to the worker
+// stack because Dispatch waits until the UI has finished using them.
+class RenderWorker
+{
+public:
+   ~RenderWorker()
+   {
+      {
+         std::lock_guard lock{mutex};
+         stopping = true;
+      }
+      condition.notify_one();
+      if (thread.joinable())
+         thread.join();
+   }
+
+   void Start(MixRenderJob &job, wxEvtHandler &owner)
+   {
+      thread = std::thread([this, &job, &owner] {
+         const Sequence::ReadDispatcher dispatch = [&](auto action) {
+            std::unique_lock lock{mutex};
+            if (stopping)
+               throw Stopped{};
+            auto event = std::make_unique<wxThreadEvent>(workerReady);
+            requestError = {};
+            request = std::move(action);
+            wxQueueEvent(&owner, event.release());
+            condition.wait(lock, [&] { return stopping || !request; });
+            if (stopping)
+               throw Stopped{};
+            if (requestError)
+               std::rethrow_exception(requestError);
+         };
+
+         try {
+            const Sequence::ScopedReadDispatcher reads{dispatch};
+            while (job.ProcessNext(workerSamplesPerStep, dispatch))
+               elapsed.store(job.Elapsed());
+         }
+         catch (const Stopped &) {}
+         catch (...) { failure = std::current_exception(); }
+         done.store(true);
+      });
+   }
+
+   void ServiceRequest()
+   {
+      std::unique_lock lock{mutex};
+      if (!request)
+         return;
+      // The worker is waiting on the condition variable. Keep the request
+      // alive until the callable and all its borrowed buffers are finished.
+      try { request(); }
+      catch (...) { requestError = std::current_exception(); }
+      request = {};
+      lock.unlock();
+      condition.notify_one();
+   }
+
+   std::atomic<double> elapsed{};
+   std::atomic<bool> done{};
+   std::exception_ptr failure; // Published by done.
+
+private:
+   struct Stopped {};
+   std::mutex mutex;
+   std::condition_variable condition;
+   std::function<void()> request;
+   std::exception_ptr requestError;
+   bool stopping{};
+   std::thread thread;
+};
+
 }
 
 struct OperationsToolBar::Render {
@@ -47,6 +130,7 @@ struct OperationsToolBar::Render {
    Clock::time_point started{};
    Clock::time_point finished{};
    bool complete{};
+   std::unique_ptr<RenderWorker> worker; // Destroy and join before the job.
 };
 
 Identifier OperationsToolBar::ID()
@@ -63,11 +147,16 @@ OperationsToolBar::OperationsToolBar(AudacityProject &project)
    : ToolBar(project, XO("Operations"), ID(), true)
 {
    Bind(wxEVT_TIMER, &OperationsToolBar::OnTimer, this, mTimer.GetId());
+   Bind(workerReady, [this](wxThreadEvent &) {
+      if (mRender && mRender->worker && CanServiceRender())
+         mRender->worker->ServiceRequest();
+   });
 }
 
 OperationsToolBar::~OperationsToolBar()
 {
    mTimer.Stop();
+   mRender.reset();
 }
 
 void OperationsToolBar::Populate()
@@ -129,7 +218,8 @@ void OperationsToolBar::UpdateDisplay()
    }
    if (mRender && !mRender->complete) {
       const auto duration = mRender->job->Duration();
-      const auto elapsed = mRender->job->Elapsed();
+      const auto elapsed = mRender->worker
+         ? mRender->worker->elapsed.load() : mRender->job->Elapsed();
       const auto time = std::chrono::duration<double>(mRender->processingTime).count();
       if (elapsed > 0 && duration > elapsed && time >= 0.5) {
          const auto remaining = std::ceil(time * (duration - elapsed) / elapsed);
@@ -180,6 +270,16 @@ void OperationsToolBar::StartMixRender()
       return;
 
    render->started = Clock::now();
+   if (gPrefs->ReadBool(wxT("/AudioIO/MixRenderWorker"), false)) {
+      render->worker = std::make_unique<RenderWorker>();
+      try {
+         render->worker->Start(*render->job, *this);
+      }
+      catch (const std::system_error &) {
+         // The existing UI-sliced path is available if thread creation fails.
+         render->worker.reset();
+      }
+   }
    mRender = std::move(render);
    UpdateDisplay();
    ToolManager::Get(mProject).Expose(ID(), true);
@@ -195,6 +295,12 @@ void OperationsToolBar::Cancel()
    }
 }
 
+bool OperationsToolBar::CanServiceRender() const
+{
+   const auto &window = ProjectWindow::Get(mProject);
+   return !window.IsBeingDeleted() && window.IsEnabled() && !mProject.mbBusyImporting;
+}
+
 void OperationsToolBar::OnTimer(wxTimerEvent &)
 {
    if (!mRender)
@@ -206,7 +312,7 @@ void OperationsToolBar::OnTimer(wxTimerEvent &)
       return;
    }
    // An existing modal operation may yield timer events mid-command.
-   if (!window.IsEnabled() || mProject.mbBusyImporting) {
+   if (!CanServiceRender()) {
       mRender->previousSliceEnd = {};
       mTimer.StartOnce(blockedPollMs);
       return;
@@ -214,7 +320,23 @@ void OperationsToolBar::OnTimer(wxTimerEvent &)
 
    GuardedCall<void>([&] {
       auto &render = *mRender;
-      if (!render.complete) {
+      if (render.worker && !render.complete) {
+         render.worker->ServiceRequest();
+         render.complete = render.worker->done.load();
+         if (render.complete && render.worker->failure)
+            std::rethrow_exception(render.worker->failure);
+         const auto now = Clock::now();
+         render.processingTime = now - render.started;
+         if (render.complete)
+            render.finished = now;
+         const auto duration = render.job->Duration();
+         const auto fraction = duration > 0
+            ? std::clamp(render.worker->elapsed.load() / duration, 0.0, 1.0) : 0.0;
+         render.progress = render.complete ? progressRange
+            : static_cast<int>(progressRange * fraction);
+         UpdateDisplay();
+      }
+      else if (!render.complete) {
          const auto start = Clock::now();
          const auto deadline = start + renderBudget;
          do {
@@ -239,7 +361,7 @@ void OperationsToolBar::OnTimer(wxTimerEvent &)
       }
 
       if (!render.complete || AudioIOBusyPred(mProject)) {
-         mTimer.StartOnce(render.complete ? blockedPollMs : nextSliceMs);
+         mTimer.StartOnce(render.complete || render.worker ? blockedPollMs : nextSliceMs);
          return;
       }
 
@@ -269,7 +391,11 @@ void OperationsToolBar::OnTimer(wxTimerEvent &)
          tracks.Remove(mix);
          throw;
       }
-   }, [this](AudacityException *) { Cancel(); });
+   }, [this](AudacityException *exception) {
+      Cancel();
+      if (!exception)
+         BasicUI::ShowErrorDialog({}, XO("Mix and Render"), XO("The render failed."), {});
+   });
 }
 
 namespace {

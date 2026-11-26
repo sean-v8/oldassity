@@ -301,6 +301,16 @@ bool ProjectFileManager::DoSave(const FilePath & fileName, const bool fromSaveAs
    auto &projectFileIO = ProjectFileIO::Get( proj );
    const auto &settings = ProjectSettings::Get( proj );
 
+   // A save to another file can replace the database connection used by
+   // detached source and output blocks while the copy is yielding to the UI.
+   if (fileName != projectFileIO.GetFileName()) {
+      if (const auto *operations = OperationsToolBar::Get(proj);
+          operations && operations->IsRunning()) {
+         AudacityMessageBox(XO("Finish or cancel the operation before saving this project to another file."));
+         return false;
+      }
+   }
+
    // Some confirmation dialogs
    {
       if (TempDirectory::FATFilesystemDenied(fileName, XO("Projects cannot be saved to FAT drives.")))
