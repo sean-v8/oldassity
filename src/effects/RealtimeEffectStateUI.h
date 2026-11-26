@@ -70,6 +70,7 @@ private:
    std::shared_ptr<const EffectSettings> mCheckpoint;
    bool mParameterChanged{};
    bool mInPlaceHistory{};
+   std::shared_ptr<EffectInstance> mRetainedEditorInstance;
    bool mRestoringSettings{};
    wxTimer mSettingsTimer{ this };
    AudacityProject *mpProject{};

@@ -166,6 +166,7 @@ void RealtimeEffectStateUI::Show(AudacityProject& project)
    mEffectUIHost->PushEventHandler(this);
    mpProject = &project;
    mInPlaceHistory = mEffectUIHost->GetEditor()->SupportsInPlaceSettingsHistory();
+   mRetainedEditorInstance = mInPlaceHistory ? pInstance : nullptr;
    mCheckpoint = mInPlaceHistory
       ? std::make_shared<const EffectSettings>(access->Get()) : nullptr;
 
