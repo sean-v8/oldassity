@@ -43,6 +43,7 @@ Paul Licameli split from AudacityProject.cpp
 #include "toolbars/MeterToolBar.h"
 #include "toolbars/SelectionBar.h"
 #include "toolbars/SpectralSelectionBar.h"
+#include "toolbars/OperationsToolBar.h"
 #include "toolbars/TimeToolBar.h"
 #include "toolbars/ToolManager.h"
 #include "AudacityMessageBox.h"
@@ -552,6 +553,9 @@ void ProjectManager::OnCloseWindow(wxCloseEvent & event)
    // We want wxWidgets to clean it up for us.
    // TODO: Is there a Mac issue here??
    // SetMenuBar(NULL);
+
+   if (auto *operations = OperationsToolBar::Get(project))
+      operations->Cancel();
 
    // Compact the project.
    projectFileManager.CompactProjectOnClose();

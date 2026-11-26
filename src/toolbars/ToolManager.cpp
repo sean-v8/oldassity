@@ -560,6 +560,8 @@ static struct DefaultConfigEntry {
    { wxT("Transcription"),     wxT("Selection"),       {}                },
 #endif
 
+   { wxT("Operations"),        wxT("Transcription"),   {}                },
+
    // Hidden by default in bottom dock
    { wxT("SpectralSelection"), {},                     {}                },
 };

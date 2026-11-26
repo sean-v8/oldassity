@@ -49,6 +49,7 @@ Paul Licameli split from AudacityProject.cpp
 #include "ImportPlugin.h"
 #include "import/ImportMIDI.h"
 #include "import/ImportStreamDialog.h"
+#include "toolbars/OperationsToolBar.h"
 #include "toolbars/SelectionBar.h"
 #include "AudacityMessageBox.h"
 #include "widgets/FileHistory.h"
@@ -1505,6 +1506,12 @@ public:
 void ProjectFileManager::Compact()
 {
    auto &project = mProject;
+   if (const auto *operations = OperationsToolBar::Get(project);
+       operations && operations->IsRunning()) {
+      AudacityMessageBox(XO("Finish or cancel the operation before compacting this project."));
+      return;
+   }
+
    auto &undoManager = UndoManager::Get(project);
    auto &clipboard = Clipboard::Get();
    auto &projectFileIO = ProjectFileIO::Get(project);

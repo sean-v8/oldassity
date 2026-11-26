@@ -28,6 +28,7 @@
 #include "../effects/EffectUI.h"
 #include "QualitySettings.h"
 #include "../tracks/playabletrack/wavetrack/ui/WaveTrackControls.h"
+#include "../toolbars/OperationsToolBar.h"
 #include "../toolbars/ToolManager.h"
 #include "../widgets/ASlider.h"
 #include "AudacityMessageBox.h"
@@ -45,7 +46,7 @@
 // private helper classes and functions
 namespace {
 
-void DoMixAndRender(AudacityProject &project, bool toNewTrack)
+void DoMixAndRender(AudacityProject &project)
 {
    auto &tracks = TrackList::Get(project);
    auto &trackFactory = WaveTrackFactory::Get(project);
@@ -74,12 +75,9 @@ void DoMixAndRender(AudacityProject &project, bool toNewTrack)
          firstName = (*trackRange.begin())->GetName();
          firstColour = (*trackRange.begin())->GetWaveColorIndex();
       }
-      if (!toNewTrack)  {
-         // Beware iterator invalidation!
-         while (!trackRange.empty())
-            // Range iterates over leaders only
-            tracks.Remove(**trackRange.first++);
-      }
+      // Beware iterator invalidation. The range iterates over leaders only.
+      while (!trackRange.empty())
+         tracks.Remove(**trackRange.first++);
 
       // Add new tracks
       const bool stereo = newTracks->NChannels() > 1;
@@ -92,7 +90,7 @@ void DoMixAndRender(AudacityProject &project, bool toNewTrack)
 
       // Bug 2218, remember more things...
       if (selectedCount >= 1) {
-         pNewTrack->SetSelected(!toNewTrack);
+         pNewTrack->SetSelected(true);
          pNewTrack->SetWaveColorIndex(firstColour);
       }
 
@@ -574,13 +572,14 @@ void OnStereoToMono(const CommandContext &context)
 void OnMixAndRender(const CommandContext &context)
 {
    auto &project = context.project;
-   DoMixAndRender(project, false);
+   DoMixAndRender(project);
 }
 
 void OnMixAndRenderToNewTrack(const CommandContext &context)
 {
    auto &project = context.project;
-   DoMixAndRender(project, true);
+   if (auto *operations = OperationsToolBar::Get(project))
+      operations->StartMixRender();
 }
 
 void OnResample(const CommandContext &context)

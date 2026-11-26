@@ -693,6 +693,8 @@ list( APPEND SOURCES
       toolbars/SpectralSelectionBarListener.h
       toolbars/TimeSignatureToolBar.cpp
       toolbars/TimeSignatureToolBar.h
+      toolbars/OperationsToolBar.cpp
+      toolbars/OperationsToolBar.h
       toolbars/TimeToolBar.cpp
       toolbars/TimeToolBar.h
       toolbars/ToolBar.cpp
