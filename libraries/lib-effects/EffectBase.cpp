@@ -29,6 +29,15 @@
 #include "WaveTrack.h"
 #include "NumericConverterFormats.h"
 
+std::unique_ptr<BasicUI::ProgressDialog> EffectBase::MakeOperationProgress(
+   AudacityProject &project, const TranslatableString &title,
+   const TranslatableString &message, unsigned flags)
+{
+   if (auto progress = ProgressFactory::Call(project, title, message, flags))
+      return progress;
+   return BasicUI::MakeProgress(title, message, flags);
+}
+
 EffectBase::EffectBase()
 {
    // PRL:  I think this initialization of mProjectRate doesn't matter
@@ -191,8 +200,8 @@ bool EffectBase::DoEffect(EffectSettings &settings,
    {
       using namespace BasicUI;
       auto name = GetName();
-      auto progress = MakeProgress(
-         name,
+      auto progress = MakeOperationProgress(
+         pProject, name,
          XO("Applying %s...").Format( name ),
          ProgressShowCancel
       );

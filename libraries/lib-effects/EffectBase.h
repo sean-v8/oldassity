@@ -15,6 +15,7 @@
 #define __AUDACITY_EFFECT_BASE__
 
 #include "EffectPlugin.h" // to inherit
+#include "GlobalVariable.h"
 
 #include <any>
 
@@ -27,6 +28,16 @@ class EFFECTS_API EffectBase /* not final */
    : public EffectPlugin
 {
 public:
+   // A project UI can host synchronous operation progress without changing
+   // how effects process, commit, or roll back their output.
+   struct EFFECTS_API ProgressFactory : GlobalHook<ProgressFactory,
+      std::unique_ptr<BasicUI::ProgressDialog>(AudacityProject &,
+         const TranslatableString &, const TranslatableString &, unsigned)> {};
+
+   static std::unique_ptr<BasicUI::ProgressDialog> MakeOperationProgress(
+      AudacityProject &, const TranslatableString &title,
+      const TranslatableString &message, unsigned flags);
+
    EffectBase();
    ~EffectBase() override;
 

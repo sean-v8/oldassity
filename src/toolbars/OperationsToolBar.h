@@ -3,8 +3,11 @@
 
 #include "ToolBar.h"
 
+#include <deque>
 #include <memory>
 #include <wx/timer.h>
+
+namespace BasicUI { class ProgressDialog; }
 
 class wxButton;
 class wxGauge;
@@ -19,8 +22,11 @@ public:
    static Identifier ID();
    static OperationsToolBar *Get(AudacityProject &project);
 
-   void StartMixRender();
-   bool IsRunning() const { return mRender != nullptr; }
+   void StartMixRender(bool replaceSources = false);
+   bool IsRunning() const { return mRender || mEffectProgress || !mRenderQueue.empty(); }
+   std::unique_ptr<BasicUI::ProgressDialog> StartEffectProgress(
+      const TranslatableString &title, const TranslatableString &message,
+      unsigned flags);
    void Cancel();
 
    bool ShownByDefault() const override { return false; }
@@ -37,11 +43,17 @@ private:
    void OnTimer(wxTimerEvent &);
    void UpdateDisplay();
    bool CanServiceRender() const;
+   void StartNextRender();
+   void AdvanceRenderQueue();
 
+   struct EffectProgress;
+   EffectProgress *mEffectProgress{};
    struct Render;
    std::unique_ptr<Render> mRender;
+   std::deque<std::unique_ptr<Render>> mRenderQueue;
    wxTimer mTimer{ this };
    wxStaticText *mStatus{};
    wxGauge *mProgress{};
    wxButton *mCancel{};
+   wxButton *mStop{};
 };

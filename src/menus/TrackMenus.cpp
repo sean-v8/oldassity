@@ -1,7 +1,8 @@
 #include "../CommonCommandFlags.h"
 #include "../LabelTrack.h"
 #include "../Menus.h"
-#include "MixAndRender.h"
+#include "Mix.h"
+#include "EffectBase.h"
 
 #include "Prefs.h"
 #include "Project.h"
@@ -45,95 +46,6 @@
 
 // private helper classes and functions
 namespace {
-
-void DoMixAndRender(AudacityProject &project)
-{
-   auto &tracks = TrackList::Get(project);
-   auto &trackFactory = WaveTrackFactory::Get(project);
-   auto rate = ProjectRate::Get(project).GetRate();
-   auto defaultFormat = QualitySettings::SampleFormatChoice();
-   auto &trackPanel = TrackPanel::Get(project);
-   auto &window = ProjectWindow::Get(project);
-
-   auto trackRange = tracks.Selected<WaveTrack>();
-   auto newTracks = ::MixAndRender(trackRange.Filter<const WaveTrack>(),
-      Mixer::WarpOptions{ tracks.GetOwner() },
-      tracks.MakeUniqueTrackName(_("Mix")),
-      &trackFactory, rate, defaultFormat, 0.0, 0.0);
-
-   if (newTracks) {
-      // Remove originals, get stats on what tracks were mixed
-
-      // But before removing, determine the first track after the removal
-      auto last = *trackRange.rbegin();
-      auto insertionPoint = * ++ tracks.Find(last);
-
-      auto selectedCount = trackRange.size();
-      wxString firstName;
-      int firstColour = -1;
-      if (selectedCount > 0) {
-         firstName = (*trackRange.begin())->GetName();
-         firstColour = (*trackRange.begin())->GetWaveColorIndex();
-      }
-      // Beware iterator invalidation. The range iterates over leaders only.
-      while (!trackRange.empty())
-         tracks.Remove(**trackRange.first++);
-
-      // Add new tracks
-      const bool stereo = newTracks->NChannels() > 1;
-      tracks.Append(std::move(*newTracks));
-      const auto pNewTrack = *tracks.Any<WaveTrack>().rbegin();
-
-      // If we're just rendering (not mixing), keep the track name the same
-      if (selectedCount == 1)
-         pNewTrack->SetName(firstName);
-
-      // Bug 2218, remember more things...
-      if (selectedCount >= 1) {
-         pNewTrack->SetSelected(true);
-         pNewTrack->SetWaveColorIndex(firstColour);
-      }
-
-      // Permute the tracks as needed
-      // The new track appears after the old tracks (or where the old tracks
-      // had been) so that they are in the same sync-lock group
-      if (insertionPoint) {
-         std::vector<Track *> arr;
-         arr.reserve(tracks.Size());
-         size_t iBegin = 0, ii = 0;
-         for (const auto pTrack : tracks) {
-            arr.push_back(pTrack);
-            if (pTrack == insertionPoint)
-               iBegin = ii;
-            ++ii;
-         }
-         const auto end = arr.end(),
-            mid = end - 1;
-         std::rotate(arr.begin() + iBegin, mid, end);
-         tracks.Permute(arr);
-      }
-
-      // Smart history/undo message
-      if (selectedCount==1) {
-         auto msg = XO("Rendered all audio in track '%s'").Format( firstName );
-         /* i18n-hint: Convert the audio into a more usable form, so apply
-          * panning and amplification and write to some external file.*/
-         ProjectHistory::Get( project ).PushState(msg, XO("Render"));
-      }
-      else {
-         auto msg = (stereo
-            ? XO("Mixed and rendered %d tracks into one new stereo track")
-            : XO("Mixed and rendered %d tracks into one new mono track")
-         )
-            .Format((int)selectedCount);
-         ProjectHistory::Get(project).PushState(msg, XO("Mix and Render"));
-      }
-
-      trackPanel.SetFocus();
-      TrackFocus::Get(project).Set(pNewTrack);
-      pNewTrack->EnsureVisible();
-   }
-}
 
 void DoPanTracks(AudacityProject &project, float PanValue)
 {
@@ -572,7 +484,8 @@ void OnStereoToMono(const CommandContext &context)
 void OnMixAndRender(const CommandContext &context)
 {
    auto &project = context.project;
-   DoMixAndRender(project);
+   if (auto *operations = OperationsToolBar::Get(project))
+      operations->StartMixRender(true);
 }
 
 void OnMixAndRenderToNewTrack(const CommandContext &context)
@@ -660,7 +573,8 @@ void OnResample(const CommandContext &context)
       auto msg = XO("Resampling track %d").Format(++ndx);
 
       using namespace BasicUI;
-      auto progress = MakeProgress(XO("Resample"), msg);
+      auto progress = EffectBase::MakeOperationProgress(project,
+         XO("Resample"), msg, ProgressShowCancel | ProgressShowStop);
 
       // The resampling of a track may be stopped by the user.  This might
       // leave a track with multiple clips in a partially resampled state.
