@@ -1149,18 +1149,19 @@ RealtimeEffectPanel::RealtimeEffectPanel(
       return label;
    };
 
-   addStackHeader(XO("Master effects power"), XO("Master"), mMasterPower);
-   auto *MasterList = safenew ThemedWindowWrapper<RealtimeEffectListWindow>(this, wxID_ANY);
-   MasterList->SetBackgroundColorIndex(clrMedium);
-   mMasterList = MasterList;
-   vSizer->Add(mMasterList, 0, wxEXPAND);
-   vSizer->Add(safenew wxStaticLine(this), 0, wxEXPAND | wxLEFT | wxRIGHT, 6);
-
    mTrackTitle = addStackHeader(XO("Track effects power"), {}, mTrackPower);
    auto *EffectList = safenew ThemedWindowWrapper<RealtimeEffectListWindow>(this, wxID_ANY);
    EffectList->SetBackgroundColorIndex(clrMedium);
    mEffectList = EffectList;
    vSizer->Add(mEffectList, 1, wxEXPAND);
+
+   vSizer->Add(safenew wxStaticLine(this), 0, wxEXPAND | wxLEFT | wxRIGHT, 6);
+
+   addStackHeader(XO("Master effects power"), XO("Master"), mMasterPower);
+   auto *MasterList = safenew ThemedWindowWrapper<RealtimeEffectListWindow>(this, wxID_ANY);
+   MasterList->SetBackgroundColorIndex(clrMedium);
+   mMasterList = MasterList;
+   vSizer->Add(mMasterList, 0, wxEXPAND);
    mHeader = header;
    mMasterList->SetMaster(mProject);
    mTrackPower->Disable();

@@ -1954,13 +1954,20 @@ void AudioIO::FillPlayBuffers()
    // perhaps again later in play to avoid underfilling the queue and
    // falling behind the real-time demand on the consumer side in the
    // callback.
+   const auto ready = GetCommonlyWrittenForPlayback();
+   // Track controls are applied before the master effects, so overfilling
+   // this queue delays audible changes to mute, solo, and gain. Refill
+   // only once playback reaches the hardware-based queue target.
+   if (ready > mPlaybackQueueMinimum)
+      return;
+
    auto GetNeeded = [&]() -> size_t {
       // Note that reader might concurrently consume between loop passes below
       // So this might not be nondecreasing
       auto nReady = GetCommonlyWrittenForPlayback();
       return mPlaybackQueueMinimum - std::min(mPlaybackQueueMinimum, nReady);
    };
-   auto nNeeded = GetNeeded();
+   auto nNeeded = mPlaybackQueueMinimum - ready;
 
    // wxASSERT( nNeeded <= nAvailable );
 
