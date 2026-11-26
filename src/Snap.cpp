@@ -13,8 +13,10 @@
 
 #include <algorithm>
 #include <cstdlib>
+#include <cmath>
 
 #include "Project.h"
+#include "LabelTrack.h"
 #include "ProjectNumericFormats.h"
 #include "ProjectRate.h"
 #include "ProjectSnap.h"
@@ -84,8 +86,10 @@ void SnapManager::Reinit()
    auto rate = ProjectRate::Get(*mProject).GetRate();
    auto format = formats.GetSelectionFormat();
 
-   // No need to reinit if these are still the same
-   if (snapTo == mSnapTo && rate == mRate && format == mFormat)
+   const bool snapToTime = snapMode != SnapMode::SNAP_OFF && !mNoTimeSnap;
+   // The point filter also depends on whether grid snapping is enabled.
+   if (snapTo == mSnapTo && rate == mRate && format == mFormat &&
+       snapToTime == mSnapToTime && snapMode == mSnapMode)
    {
       return;
    }
@@ -98,7 +102,9 @@ void SnapManager::Reinit()
    mSnapPoints.clear();
 
    // Grab time-snapping prefs (unless otherwise requested)
-   mSnapToTime = snapMode != SnapMode::SNAP_OFF && !mNoTimeSnap;
+   mSnapToTime = snapToTime;
+   mSnapMode = snapMode;
+   mSampleSnap = mSnapToTime && mSnapTo == "samples" && mRate > 0.0;
  
    // Add a SnapPoint at t=0
    mSnapPoints.push_back(SnapPoint{});
@@ -114,6 +120,12 @@ void SnapManager::Reinit()
 // Adds to mSnapPoints, filtering by TimeConverter
 void SnapManager::CondListAdd(double t, const Track *track)
 {
+   if (mSampleSnap && dynamic_cast<const LabelTrack *>(track)) {
+      // Old projects can contain labels between samples or a rounding error
+      // away from the grid. Keep them usable as sample snap targets.
+      mSnapPoints.emplace_back(std::round(t * mRate) / mRate, track);
+      return;
+   }
    if (!mSnapToTime || ProjectSnap::Get(*mProject).SnapTime(t).time == t)
    {
       mSnapPoints.push_back(SnapPoint { t, track });
@@ -239,6 +251,25 @@ bool SnapManager::SnapToPoints(Track *currentTrack,
       // we'll use that one.
       *outT = Get(indexInThisTrack);
       return true;
+   }
+
+   // If several label boundaries share a pixel, prefer the earliest
+   // one at the nearest such pixel. Edges on distinct pixels keep the
+   // existing snap rules.
+   const auto nearestPixelDistance = PixelDiff(t, index);
+   size_t firstLabel = cnt;
+   wxInt64 labelPixel = 0;
+   for (i = left; i <= right; ++i) {
+      if (!dynamic_cast<const LabelTrack *>(mSnapPoints[i].track) ||
+          PixelDiff(t, i) != nearestPixelDistance)
+         continue;
+      const auto pixel = mZoomInfo->TimeToPosition(Get(i));
+      if (firstLabel != cnt && labelPixel == pixel) {
+         *outT = Get(firstLabel);
+         return true;
+      }
+      firstLabel = i;
+      labelPixel = pixel;
    }
 
    if (Get(right) - Get(left) < mEpsilon)

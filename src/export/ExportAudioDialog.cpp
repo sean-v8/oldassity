@@ -609,7 +609,8 @@ void ExportAudioDialog::OnExport(wxCommandEvent &event)
       });
    }
    
-   if(result == ExportResult::Success || result == ExportResult::Stopped)
+   if (result == ExportResult::Success || result == ExportResult::Stopped ||
+       result == ExportResult::Cancelled)
    {
       ImportExport::Get(mProject).SetPreferredExportRate(mExportOptionsPanel->GetSampleRate());
 
@@ -618,8 +619,11 @@ void ExportAudioDialog::OnExport(wxCommandEvent &event)
 
       ShuttleGui S(this, eIsSavingToPrefs);
       PopulateOrExchange(S);
-      event.Skip();
+      gPrefs->Flush();
    }
+
+   if (result == ExportResult::Success || result == ExportResult::Stopped)
+      event.Skip();
 }
 
 void ExportAudioDialog::OnFormatChange(wxCommandEvent& event)

@@ -18,6 +18,7 @@
 #include <vector>
 #include <wx/defs.h>
 #include "ComponentInterfaceSymbol.h"
+#include "SnapUtils.h"
 
 class AudacityProject;
 class Track;
@@ -108,6 +109,8 @@ private:
 
    // Info for snap-to-time
    bool mSnapToTime{ false };
+   bool mSampleSnap{false};
+   SnapMode mSnapMode{SnapMode::SNAP_OFF};
 
    Identifier mSnapTo {};
    double mRate{ 0.0 };

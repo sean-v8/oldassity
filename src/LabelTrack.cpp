@@ -32,6 +32,7 @@ for drawing different aspects of the label and its text box.
 #include "LabelTrack.h"
 
 #include <algorithm>
+#include <cmath>
 #include <limits.h>
 #include <float.h>
 
@@ -40,6 +41,8 @@ for drawing different aspects of the label and its text box.
 
 #include "Prefs.h"
 #include "Project.h"
+#include "ProjectRate.h"
+#include "ProjectSnap.h"
 #include "prefs/ImportExportPrefs.h"
 
 #include "TimeWarper.h"
@@ -185,9 +188,31 @@ void LabelTrack::DoOnProjectTempoChange(
          label.getT0() * ratio, label.getT1() * ratio);
 }
 
+namespace {
+double LabelSampleRate(const LabelTrack &track)
+{
+   const auto owner = track.GetOwner();
+   const auto *project = owner ? owner->GetOwner() : nullptr;
+   if (!project)
+      return 0.0;
+
+   const auto &snap = ProjectSnap::Get(*project);
+   return snap.GetSnapMode() != SnapMode::SNAP_OFF && snap.GetSnapTo() == "samples"
+      ? ProjectRate::Get(*project).GetRate() : 0.0;
+}
+
+void AlignLabelToSamples(SelectedRegion &region, double rate)
+{
+   if (rate > 0.0)
+      region.setTimes(std::round(region.t0() * rate) / rate,
+         std::round(region.t1() * rate) / rate);
+}
+}
+
 void LabelTrack::Clear(double b, double e)
 {
    assert(IsLeader());
+   const auto rate = LabelSampleRate(*this);
    // May DELETE labels, so use subscripts to iterate
    for (size_t i = 0; i < mLabels.size(); ++i) {
       auto &labelStruct = mLabels[i];
@@ -198,6 +223,7 @@ void LabelTrack::Clear(double b, double e)
       else if (relation == LabelStruct::SURROUNDS_LABEL) {
          DeleteLabel( i );
          --i;
+         continue;
       }
       else if (relation == LabelStruct::ENDS_IN_LABEL)
          labelStruct.selectedRegion.setTimes(
@@ -207,6 +233,8 @@ void LabelTrack::Clear(double b, double e)
          labelStruct.selectedRegion.setT1(b);
       else if (relation == LabelStruct::WITHIN_LABEL)
          labelStruct.selectedRegion.moveT1( - (e-b));
+      if (relation != LabelStruct::AFTER_LABEL)
+         AlignLabelToSamples(labelStruct.selectedRegion, rate);
    }
 }
 
@@ -931,11 +959,12 @@ int LabelTrack::AddLabel(const SelectedRegion &selectedRegion,
                          const wxString &title)
 {
    LabelStruct l { selectedRegion, title };
+   AlignLabelToSamples(l.selectedRegion, LabelSampleRate(*this));
 
    int len = mLabels.size();
    int pos = 0;
 
-   while (pos < len && mLabels[pos].getT0() < selectedRegion.t0())
+   while (pos < len && mLabels[pos].getT0() < l.getT0())
       pos++;
 
    mLabels.insert(mLabels.begin() + pos, l);
