@@ -53,6 +53,7 @@ class RealtimeEffectPanel : public wxPanel
    std::unique_ptr<PrefsListenerHelper> mPrefsListenerHelper;
 
 public:
+   static void ManageFavorites(wxWindow &parent);
    static RealtimeEffectPanel &Get(AudacityProject &project);
    static const RealtimeEffectPanel &Get(const AudacityProject &project);
 

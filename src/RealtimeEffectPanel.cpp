@@ -11,6 +11,9 @@
 #include "RealtimeEffectPanel.h"
 
 #include <wx/app.h>
+#include <wx/button.h>
+#include <wx/dialog.h>
+#include <wx/listbox.h>
 #include <wx/sizer.h>
 #include <wx/splitter.h>
 #include <wx/statbmp.h>
@@ -60,6 +63,37 @@
 namespace
 {
    
+   constexpr auto favoritesKey = wxT("/GUI/RealtimeEffectFavorites");
+
+   wxArrayString ReadFavorites()
+   {
+      return wxStringTokenize(gPrefs->Read(favoritesKey, wxString{}), "\n");
+   }
+
+   void SaveFavorites(const wxArrayString &favorites)
+   {
+      gPrefs->Write(favoritesKey, wxJoin(favorites, '\n', '\0'));
+      gPrefs->Flush();
+   }
+
+   using FavoriteMenuItems = std::vector<std::pair<int, wxString>>;
+
+   FavoriteMenuItems AppendFavoriteItems(wxMenu &menu, const wxArrayString &favorites)
+   {
+      FavoriteMenuItems items;
+      for (const auto &id : favorites) {
+         const auto *plugin = PluginManager::Get().GetPlugin(id);
+         if (plugin && plugin->IsEnabled() && plugin->IsEffectRealtime()) {
+            auto *item = menu.Append(wxID_ANY,
+               plugin->GetSymbol().Msgid().Translation());
+            items.emplace_back(item->GetId(), id);
+         }
+      }
+      if (items.empty())
+         menu.Append(wxID_ANY, _("No favorites yet"))->Enable(false);
+      return items;
+   }
+
    class RealtimeEffectsMenuVisitor final : public MenuVisitor
    {
       wxMenu& mMenu;
@@ -587,6 +621,7 @@ class RealtimeEffectListWindow
    wxWeakRef<AudacityProject> mProject;
    std::shared_ptr<SampleTrack> mTrack;
    AButton* mAddEffect{nullptr};
+   AButton* mAddFavorite{nullptr};
    wxStaticText* mAddEffectHint{nullptr};
    wxWindow* mAddEffectTutorialLink{nullptr};
    wxWindow* mEffectListContainer{nullptr};
@@ -619,19 +654,21 @@ public:
       effectListContainer->Hide();
       mEffectListContainer = effectListContainer;
 
-      auto addEffect = safenew ThemedAButtonWrapper<AButton>(this, wxID_ANY);
-      addEffect->SetImageIndices(0,
-            bmpHButtonNormal,
-            bmpHButtonHover,
-            bmpHButtonDown,
-            bmpHButtonHover,
-            bmpHButtonDisabled);
-      addEffect->SetTranslatableLabel(XO("Add effect"));
-      addEffect->SetButtonType(AButton::TextButton);
-      addEffect->SetBackgroundColorIndex(clrMedium);
-      addEffect->SetForegroundColorIndex(clrTrackPanelText);
-      addEffect->Bind(wxEVT_BUTTON, &RealtimeEffectListWindow::OnAddEffectClicked, this);
-      mAddEffect = addEffect;
+      const auto addButton = [this](const TranslatableString &text, bool favorite) {
+         auto *button = safenew ThemedAButtonWrapper<AButton>(this, wxID_ANY);
+         button->SetImageIndices(0, bmpHButtonNormal, bmpHButtonHover,
+            bmpHButtonDown, bmpHButtonHover, bmpHButtonDisabled);
+         button->SetTranslatableLabel(text);
+         button->SetButtonType(AButton::TextButton);
+         button->SetBackgroundColorIndex(clrMedium);
+         button->SetForegroundColorIndex(clrTrackPanelText);
+         button->Bind(wxEVT_BUTTON, [this, button, favorite](wxCommandEvent &) {
+            OnAddEffectClicked(*button, favorite);
+         });
+         return button;
+      };
+      mAddEffect = addButton(XO("+ Effect"), false);
+      mAddFavorite = addButton(XO("+ Favorite"), true);
 
       auto addEffectHint = safenew ThemedWindowWrapper<wxStaticText>(this, wxID_ANY, wxEmptyString, wxDefaultPosition, wxDefaultSize, wxST_NO_AUTORESIZE);
       //Workaround: text is set in the OnSizeChange
@@ -661,7 +698,10 @@ public:
       dropHintLine->Hide();
 
       rootSizer->Add(mEffectListContainer, 0, wxEXPAND | wxBOTTOM, 10);
-      rootSizer->Add(addEffect, 0, wxLEFT | wxRIGHT | wxBOTTOM | wxEXPAND, 20);
+      auto *buttons = safenew wxBoxSizer(wxHORIZONTAL);
+      buttons->Add(mAddEffect, 1, wxEXPAND | wxRIGHT, 4);
+      buttons->Add(mAddFavorite, 1, wxEXPAND);
+      rootSizer->Add(buttons, 0, wxLEFT | wxRIGHT | wxBOTTOM | wxEXPAND, 20);
       rootSizer->Add(addEffectHint, 0, wxLEFT | wxRIGHT | wxBOTTOM | wxEXPAND, 20);
       rootSizer->Add(addEffectTutorialLink, 0, wxLEFT | wxRIGHT | wxEXPAND, 20);
 
@@ -765,22 +805,10 @@ public:
          menu.AppendSeparator();
       }
       
-      constexpr auto favoritesKey = wxT("/GUI/RealtimeEffectFavorites");
-      auto favorites = wxStringTokenize(gPrefs->Read(favoritesKey, wxString{}), "\n");
+      auto favorites = ReadFavorites();
       const bool alreadyFavorite = favorites.Index(selectedEffectID) != wxNOT_FOUND;
-
       auto favoriteMenu = std::make_unique<wxMenu>();
-      std::vector<std::pair<int, wxString>> shortcuts;
-      for (const auto &id : favorites) {
-         const auto *plugin = PluginManager::Get().GetPlugin(id);
-         if (plugin && plugin->IsEnabled() && plugin->IsEffectRealtime()) {
-            auto *item = favoriteMenu->Append(wxID_ANY,
-               plugin->GetSymbol().Msgid().Translation());
-            shortcuts.emplace_back(item->GetId(), id);
-         }
-      }
-      if (shortcuts.empty())
-         favoriteMenu->Append(wxID_ANY, _("No favorites yet"))->Enable(false);
+      const auto shortcuts = AppendFavoriteItems(*favoriteMenu, favorites);
 
       int toggleFavorite = wxID_NONE;
       if (!selectedEffectID.empty()) {
@@ -814,8 +842,7 @@ public:
                favorites.Remove(selectedEffectID);
             else
                favorites.Add(selectedEffectID);
-            gPrefs->Write(favoritesKey, wxJoin(favorites, '\n', '\0'));
-            gPrefs->Flush();
+            SaveFavorites(favorites);
          }
          else {
             const auto shortcut = std::find_if(shortcuts.begin(), shortcuts.end(),
@@ -1015,6 +1042,7 @@ public:
             InsertEffectRow(i, effects.GetStateAt(i));
       }
       mAddEffect->SetEnabled(!!mTrack);
+      mAddFavorite->SetEnabled(!!mTrack);
       //Workaround for GTK: Underlying GTK widget does not update
       //its size when wxWindow size is set to zero
       mEffectListContainer->Show(!isEmpty);
@@ -1024,12 +1052,20 @@ public:
       SendSizeEventToParent();
    }
 
-   void OnAddEffectClicked(const wxCommandEvent& event)
+   void OnAddEffectClicked(wxWindow &button, bool favorite)
    {
       if(!mTrack || mProject == nullptr)
          return;
 
-      const auto effectID = PickEffect(dynamic_cast<wxWindow*>(event.GetEventObject()), {});
+      std::optional<wxString> effectID;
+      if (favorite) {
+         wxMenu menu;
+         for (const auto &[item, id] : AppendFavoriteItems(menu, ReadFavorites()))
+            menu.Bind(wxEVT_MENU, [&, id](wxCommandEvent &) { effectID = id; }, item);
+         button.PopupMenu(&menu, button.GetClientRect().GetLeftBottom());
+      }
+      else
+         effectID = PickEffect(&button, {});
       
       if(!effectID || effectID->empty())
          return;
@@ -1404,4 +1440,66 @@ void RealtimeEffectPanel::OnCharHook(wxKeyEvent& evt)
       Close();
    else
       evt.Skip();
+}
+
+void RealtimeEffectPanel::ManageFavorites(wxWindow &parent)
+{
+   auto favorites = ReadFavorites();
+   wxDialog dialog(&parent, wxID_ANY, _("Manage Favorites"));
+   auto *layout = safenew wxBoxSizer(wxVERTICAL);
+   auto *list = safenew wxListBox(&dialog, wxID_ANY, wxDefaultPosition, wxSize(360, 200));
+   list->SetName(_("Favorite realtime effects"));
+   layout->Add(list, 1, wxEXPAND | wxALL, 8);
+
+   auto *actions = safenew wxBoxSizer(wxHORIZONTAL);
+   auto *up = safenew wxButton(&dialog, wxID_ANY, _("Move Up"));
+   auto *down = safenew wxButton(&dialog, wxID_ANY, _("Move Down"));
+   auto *remove = safenew wxButton(&dialog, wxID_ANY, _("Remove"));
+   actions->Add(up, 0, wxRIGHT, 4);
+   actions->Add(down, 0, wxRIGHT, 4);
+   actions->Add(remove);
+   layout->Add(actions, 0, wxLEFT | wxRIGHT | wxBOTTOM, 8);
+   layout->Add(dialog.CreateStdDialogButtonSizer(wxOK | wxCANCEL), 0, wxEXPAND | wxALL, 8);
+
+   const auto updateButtons = [&] {
+      const auto row = list->GetSelection();
+      up->Enable(row > 0);
+      down->Enable(row != wxNOT_FOUND && static_cast<size_t>(row + 1) < favorites.size());
+      remove->Enable(row != wxNOT_FOUND);
+   };
+   const auto populate = [&](int row) {
+      wxArrayString names;
+      for (const auto &id : favorites) {
+         const auto *plugin = PluginManager::Get().GetPlugin(id);
+         names.Add(plugin ? plugin->GetSymbol().Msgid().Translation()
+                          : XO("Unavailable: %s").Format(id).Translation());
+      }
+      list->Set(names);
+      if (row >= 0 && static_cast<size_t>(row) < favorites.size())
+         list->SetSelection(row);
+      updateButtons();
+   };
+   const auto move = [&](int offset) {
+      const auto row = list->GetSelection();
+      const auto target = row + offset;
+      if (row != wxNOT_FOUND && target >= 0 && static_cast<size_t>(target) < favorites.size()) {
+         std::swap(favorites[row], favorites[target]);
+         populate(target);
+      }
+   };
+   up->Bind(wxEVT_BUTTON, [&](wxCommandEvent &) { move(-1); });
+   down->Bind(wxEVT_BUTTON, [&](wxCommandEvent &) { move(1); });
+   remove->Bind(wxEVT_BUTTON, [&](wxCommandEvent &) {
+      const auto row = list->GetSelection();
+      if (row != wxNOT_FOUND) {
+         favorites.RemoveAt(row);
+         populate(std::min(row, static_cast<int>(favorites.size()) - 1));
+      }
+   });
+   list->Bind(wxEVT_LISTBOX, [&](wxCommandEvent &) { updateButtons(); });
+   populate(0);
+   dialog.SetSizerAndFit(layout);
+   dialog.CentreOnParent();
+   if (dialog.ShowModal() == wxID_OK)
+      SaveFavorites(favorites);
 }

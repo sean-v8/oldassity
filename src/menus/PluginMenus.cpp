@@ -147,6 +147,11 @@ void OnAddRealtimeEffects(const CommandContext& context)
 
 void OnAnalyzer2(wxCommandEvent& evt) { return; }
 
+void OnManageFavorites(const CommandContext &context)
+{
+   RealtimeEffectPanel::ManageFavorites(ProjectWindow::Get(context.project));
+}
+
 void OnRepeatLastGenerator(const CommandContext &context)
 {
    auto& menuManager = MenuManager::Get(context.project);
@@ -364,7 +369,9 @@ BaseItemSharedPtr EffectMenu()
 
       Section( "RealtimeEffects",
          Command ( wxT("AddRealtimeEffects"), XXO("Add Realtime Effects"),
-            OnAddRealtimeEffects,  HasTrackFocusFlag(), wxT("E") )
+            OnAddRealtimeEffects,  HasTrackFocusFlag(), wxT("E") ),
+         Command( wxT("ManageRealtimeEffectFavorites"), XXO("Manage Favorites..."),
+            OnManageFavorites, AlwaysEnabledFlag )
       ),
 
       Section( "RepeatLast",
