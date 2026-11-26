@@ -133,7 +133,7 @@ Identifier SelectionBar::ID()
 }
 
 SelectionBar::SelectionBar( AudacityProject &project )
-: ToolBar(project, XO("Selection"), ID()),
+: ToolBar(project, XO("Selection"), ID(), true),
   mListener(NULL), mRate(0.0),
   mStart(0.0), mEnd(0.0), mLength(0.0), mCenter(0.0)
 {
@@ -210,16 +210,6 @@ AButton* SelectionBar::MakeSetupButton()
    return btn;
 }
 
-void SelectionBar::AddTitle(
-   const TranslatableString & Title, wxSizer * pSizer ){
-   const auto translated = Title.Translation();
-   auStaticText * pTitle = safenew auStaticText(this, translated );
-   pTitle->SetBackgroundColour( theTheme.Colour( clrMedium ));
-   pTitle->SetForegroundColour( theTheme.Colour( clrTrackPanelText ) );
-   pSizer->Add( pTitle, 0, wxEXPAND | wxRIGHT, 5 );
-}
-
-
 void SelectionBar::AddTime(
    int id, wxSizer * pSizer ){
    auto formatName = mListener ? mListener->AS_GetSelectionFormat()
@@ -227,7 +217,33 @@ void SelectionBar::AddTime(
    auto pCtrl = safenew NumericTextCtrl(FormatterContext::ProjectContext(mProject),
       this, id, NumericConverterType_TIME(), formatName, 0.0);
 
+   pCtrl->UseCompactLabels();
    pCtrl->SetDigitSize(16, 29);
+   pCtrl->SetMenuExtension([this, id](wxMenu &menu) {
+      const bool starts = mSelectionMode == SelectionMode::StartEnd ||
+         mSelectionMode == SelectionMode::StartLength;
+      menu.AppendSeparator();
+      const auto add = [&](const TranslatableString &label, SelectionMode mode, bool checked) {
+         auto *item = menu.AppendRadioItem(wxID_ANY, label.Translation());
+         item->Check(checked);
+         menu.Bind(wxEVT_MENU, [this, mode](wxCommandEvent &) {
+            CallAfter([this, mode] {
+               SetSelectionMode(mode);
+               SelectionModeUpdated();
+            });
+         }, item->GetId());
+      };
+      if (id == 0) {
+         add(XO("Start"), SelectionMode::StartEnd, starts);
+         add(XO("Length"), SelectionMode::LengthEnd, !starts);
+      }
+      else {
+         const auto end = starts ? SelectionMode::StartEnd : SelectionMode::LengthEnd;
+         const auto other = starts ? SelectionMode::StartLength : SelectionMode::LengthCenter;
+         add(XO("End"), end, mSelectionMode == end);
+         add(starts ? XO("Length") : XO("Center"), other, mSelectionMode == other);
+      }
+   });
 
    pCtrl->Bind(
       wxEVT_TEXT,
@@ -248,70 +264,16 @@ void SelectionBar::AddTime(
       });
 }
 
-void SelectionBar::AddSelectionSetupButton(wxSizer* pSizer)
-{
-   auto setupBtn = MakeSetupButton();
-
-   auto showMenu = [this, setupBtn]()
-   {
-      static const wxString choices[4] = {
-         _("Start and End of Selection"),
-         _("Start and Length of Selection"),
-         _("Length and End of Selection"),
-         _("Length and Center of Selection"),
-      };
-
-      wxMenu menu;
-      int selectionMode {};
-      for (auto& choice : choices)
-      {
-         auto subMenu = menu.AppendRadioItem(wxID_ANY, choice);
-
-         if (static_cast<SelectionMode>(selectionMode) == mSelectionMode)
-            subMenu->Check();
-
-         menu.Bind(
-            wxEVT_MENU,
-            [this, selectionMode](auto& evt)
-            {
-               SetSelectionMode(static_cast<SelectionMode>(selectionMode));
-               SelectionModeUpdated();
-            },
-            subMenu->GetId());
-
-         ++selectionMode;
-      }
-
-      menu.Bind(wxEVT_MENU_CLOSE, [setupBtn](auto&) { setupBtn->PopUp(); });
-
-      BasicMenu::Handle { &menu }.Popup(wxWidgetsWindowPlacement { setupBtn });
-   };
-
-   setupBtn->Bind(wxEVT_BUTTON, [this, showMenu](auto&) { showMenu(); });
-   pSizer->Add(setupBtn, 0, wxALIGN_RIGHT | wxBOTTOM | wxRIGHT, 5);
-
-   mSetupButton = setupBtn;
-}
-
 void SelectionBar::Populate()
 {
    SetBackgroundColour( theTheme.Colour( clrMedium  ) );
 
    mTimeControls[0] = mTimeControls[1] = {};
 
-   // Outer sizer has space top and left.
-   // Inner sizers have space on right only.
-   // This choice makes for a nice border and internal spacing and places clear responsibility
-   // on each sizer as to what spacings it creates.
-   wxFlexGridSizer *mainSizer = safenew wxFlexGridSizer(2, 1, 1);
+   auto *mainSizer = safenew wxBoxSizer(wxVERTICAL);
    Add(mainSizer, 0, wxALIGN_CENTER_VERTICAL | wxLEFT, 5);
-
-   AddTitle(XO("Selection"), mainSizer);
    AddTime(0, mainSizer);
-   AddSelectionSetupButton(mainSizer);
    AddTime(1, mainSizer);
-
-   mSetupButton->MoveBeforeInTabOrder(mTimeControls[0]);
 
    // Update the selection mode before the layout
    SetSelectionMode(mSelectionMode);
@@ -364,9 +326,22 @@ void SelectionBar::RegenerateTooltips()
 
 void SelectionBar::OnSize(wxSizeEvent &evt)
 {
-   Refresh( true );
-
    evt.Skip();
+   if (!GetSizer() || !mTimeControls[1])
+      return;
+   const int width = GetSize().x - 24;
+   int height = 29;
+   for (; height > 17; --height) {
+      const int digitWidth = height * 16 / 29;
+      if (mTimeControls[0]->ComputeSizing(false, digitWidth, height).x <= width &&
+          mTimeControls[1]->ComputeSizing(false, digitWidth, height).x <= width)
+         break;
+   }
+   for (auto *control : mTimeControls)
+      if (control->GetDigitSize().y != height)
+         control->SetDigitSize(height * 16 / 29, height);
+   Layout();
+   Refresh(false);
 }
 
 // When a control value is changed, this function is called.
@@ -502,7 +477,7 @@ void SelectionBar::OnUpdate(wxCommandEvent &evt)
 
    RegenerateTooltips();
 
-   Updated();
+   FitToTimeControls();
 }
 
 void SelectionBar::OnIdle( wxIdleEvent &evt )
@@ -642,18 +617,26 @@ void SelectionBar::UpdateTimeControlsFormat(const NumericFormatSymbol& format)
 
 void SelectionBar::ResizingDone()
 {
-   // A layout saved with smaller digits may be narrower than the readouts.
-   const auto best = GetBestSize();
-   SetSize(wxMax(GetSize().x, best.x), wxMax(GetSize().y, best.y));
+   Layout();
+   Updated();
+}
+
+int SelectionBar::GetMinToolbarWidth()
+{
+   if (!mTimeControls[0] || !mTimeControls[1])
+      return 160;
+   return 24 + std::max(
+      mTimeControls[0]->ComputeSizing(false, 9, 17).x,
+      mTimeControls[1]->ComputeSizing(false, 9, 17).x);
 }
 
 void SelectionBar::FitToTimeControls()
 {
-   wxSize sz = GetMinSize();
-   sz.SetWidth(10);
-   SetMinSize(sz);
-   Fit();
-   Layout();
+   const int width = GetMinToolbarWidth();
+   SetMinSize({width, toolbarTriple});
+   if (GetSize().x < width)
+      SetSize(width, GetSize().y);
+   SendSizeEvent();
    Updated();
 }
 

@@ -18,6 +18,9 @@
 #include "Observer.h"
 
 class NumericTextCtrl;
+class wxComboCtrl;
+class wxCheckBox;
+class wxBoxSizer;
 class TimeToolBarListener;
 
 class TimeToolBar final : public ToolBar
@@ -50,6 +53,13 @@ public:
 
 private:
    void SetResizingLimits();
+   void AddSnapControls(wxBoxSizer &rows);
+   void OnSnapModeChanged();
+   wxBoxSizer *mTimeRow{};
+   wxBoxSizer *mSnapRow{};
+   wxCheckBox *mSnapModeCheckBox{};
+   wxComboCtrl *mSnapToCombo{};
+   Observer::Subscription mSnapSubscription;
    wxSize ComputeSizing(int digitH);
    
    void OnUpdate(wxCommandEvent &evt);

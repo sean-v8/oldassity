@@ -354,7 +354,7 @@ wxSize NumericTextCtrl::ComputeSizing(bool update, wxCoord boxW, wxCoord boxH)
    }
 
    // The label font should be a little smaller
-   std::unique_ptr<wxFont> labelFont = std::make_unique<wxFont>(fontSize - 1, wxFONTFAMILY_DEFAULT, wxFONTSTYLE_NORMAL, wxFONTWEIGHT_NORMAL);
+   std::unique_ptr<wxFont> labelFont = std::make_unique<wxFont>(mCompactLabels ? std::min(8, fontSize - 1) : fontSize - 1, wxFONTFAMILY_DEFAULT, wxFONTSTYLE_NORMAL, wxFONTWEIGHT_NORMAL);
 
    // Use the label font for all remaining measurements since only non-digit text is left
    dc.SetFont(*labelFont);
@@ -592,6 +592,8 @@ void NumericTextCtrl::OnContext(wxContextMenuEvent &event)
       });
 
    menu.Bind(wxEVT_MENU, [](auto&){});
+   if (mMenuExtension)
+      mMenuExtension(menu);
    BasicMenu::Handle{ &menu }.Popup(
       wxWidgetsWindowPlacement{ this },
       { 0, 0 }
@@ -606,7 +608,7 @@ void NumericTextCtrl::OnContext(wxContextMenuEvent &event)
 
    int eventType = 0;
 
-   if (mType == NumericConverterType_TIME())
+   if (mType == NumericConverterType_TIME() || mType == NumericConverterType_DURATION())
       eventType = EVT_TIMETEXTCTRL_UPDATED;
    else if (mType == NumericConverterType_FREQUENCY())
       eventType = EVT_FREQUENCYTEXTCTRL_UPDATED;

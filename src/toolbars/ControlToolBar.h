@@ -71,6 +71,9 @@ class AUDACITY_DLL_API ControlToolBar final : public ToolBar {
    void PlayDefault();
 
    DockID DefaultDockID() const override { return BotDockID; }
+   int GetMinToolbarWidth() override { return 225; }
+   int GetInitialWidth() override { return 385; }
+   wxSize GetDockedSize() override { return {GetSize().x, toolbarTriple}; }
    int GetMinToolbarHeight() override { return toolbarTriple; }
    void Populate() override;
    void Repaint(wxDC *dc) override;

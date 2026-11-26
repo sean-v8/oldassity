@@ -59,6 +59,9 @@ class AUDACITY_DLL_API SelectionBar final : public ToolBar {
 
    void Create(wxWindow *parent) override;
 
+   int GetMinToolbarWidth() override;
+   int GetInitialWidth() override { return 270; }
+   wxSize GetDockedSize() override { return {GetSize().x, toolbarTriple}; }
    int GetMinToolbarHeight() override { return toolbarTriple; }
    void Populate() override;
    void ResizingDone() override;
@@ -75,10 +78,7 @@ class AUDACITY_DLL_API SelectionBar final : public ToolBar {
  private:
    AButton* MakeSetupButton();
    
-   void AddTitle( const TranslatableString & Title,
-      wxSizer * pSizer );
    void AddTime( int id, wxSizer * pSizer );
-   void AddSelectionSetupButton(wxSizer* pSizer);
 
    void SetSelectionMode(SelectionMode mode);
    void ValuesToControls();
@@ -104,7 +104,6 @@ class AUDACITY_DLL_API SelectionBar final : public ToolBar {
    SelectionMode mLastSelectionMode {};
 
    std::array<NumericTextCtrl*, 2> mTimeControls {};
-   AButton* mSetupButton{};
 
    Observer::Subscription mFormatChangedToFitValueSubscription[2];
 

@@ -290,6 +290,17 @@ AButton::AButtonState AButton::GetState()
    return state;
 }
 
+void AButton::SetScalableImages(unsigned index,
+   const std::array<wxImage, AButtonStateCount> &frames,
+   const std::array<wxImage, AButtonStateCount> &icons)
+{
+   SetAlternateImages(index, frames[AButtonUp], frames[AButtonOver],
+      frames[AButtonDown], frames[AButtonOverDown], frames[AButtonDis]);
+   if (index >= mScalableIcons.size())
+      mScalableIcons.resize(index + 1);
+   mScalableIcons[index] = icons;
+}
+
 void AButton::OnPaint(wxPaintEvent & WXUNUSED(event))
 {
    wxBufferedPaintDC dc(this);
@@ -302,7 +313,25 @@ void AButton::OnPaint(wxPaintEvent & WXUNUSED(event))
    if(HasAlternateImages(mAlternateIdx))
    {
       AButtonState buttonState = GetState();
-      if(mType == ImageButton)
+      if (mAlternateIdx < mScalableIcons.size() &&
+          mScalableIcons[mAlternateIdx][buttonState].IsOk()) {
+         auto frame = wxBitmap(mImages[mAlternateIdx][buttonState]);
+         AColor::DrawFrame(dc, buttonRect, frame);
+         const auto &icon = mScalableIcons[mAlternateIdx][buttonState];
+         const int width = std::max(1, buttonRect.width - 10);
+         const int height = std::max(1, buttonRect.height - 10);
+         const double scale = std::min({1.0,
+            static_cast<double>(width) / icon.GetWidth(),
+            static_cast<double>(height) / icon.GetHeight()});
+         const auto graphic = scale < 1.0 ? icon.Scale(
+            std::max(1, static_cast<int>(icon.GetWidth() * scale)),
+            std::max(1, static_cast<int>(icon.GetHeight() * scale)),
+            wxIMAGE_QUALITY_BILINEAR) : icon;
+         const int offset = buttonState == AButtonDown || buttonState == AButtonOverDown;
+         dc.DrawBitmap(graphic, buttonRect.x + (buttonRect.width - graphic.GetWidth()) / 2 + offset,
+            buttonRect.y + (buttonRect.height - graphic.GetHeight()) / 2 + offset);
+      }
+      else if(mType == ImageButton)
          dc.DrawBitmap(mImages[mAlternateIdx][buttonState], buttonRect.GetTopLeft());
       else if(mType == FrameButton)
       {

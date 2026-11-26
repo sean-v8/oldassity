@@ -23,6 +23,7 @@
 
 
 #include "ToolDock.h"
+#include "OperationsToolBar.h"
 
 #include <wx/tokenzr.h>
 
@@ -575,6 +576,8 @@ void ToolDock::VisitLayout(LayoutVisitor &visitor,
       }
 
       // Inflate the size to leave margins
+      if (ct->GetSection() == OperationsToolBar::ID())
+         sz.x = ct->GetMinToolbarWidth();
       int tw = sz.GetWidth() + toolbarGap;
       int th = sz.GetHeight() + toolbarGap;
 
@@ -717,6 +720,21 @@ void ToolDock::LayoutToolBars()
       this
    };
    VisitLayout(sizeSetter, &mWrappedConfiguration);
+
+   if (auto *operations = mWrappedConfiguration.FindToolBar(OperationsToolBar::ID())) {
+      int right = GetParent()->GetClientSize().x - toolbarGap;
+      const auto origin = operations->GetPosition();
+      for (const auto &place : mWrappedConfiguration) {
+         const auto *bar = place.pTree->pBar;
+         const auto pos = bar->GetPosition();
+         if (pos.x > origin.x && pos.y < origin.y + operations->GetSize().y &&
+             pos.y + bar->GetSize().y > origin.y)
+            right = std::min(right, pos.x - toolbarGap);
+      }
+      const int width = std::max(operations->GetMinToolbarWidth(), right - origin.x);
+      if (operations->GetSize().x != width)
+         operations->SetSize(width, operations->GetSize().y);
+   }
 
    // Set tab order and layout internal controls.
    {

@@ -193,7 +193,7 @@ OperationsToolBar *OperationsToolBar::Get(AudacityProject &project)
 }
 
 OperationsToolBar::OperationsToolBar(AudacityProject &project)
-   : ToolBar(project, XO("Operations"), ID(), true)
+   : ToolBar(project, XO("Operations"), ID())
 {
    Bind(wxEVT_TIMER, &OperationsToolBar::OnTimer, this, mTimer.GetId());
    mUndoSubscription = UndoManager::Get(project).Subscribe([this](UndoRedoMessage event) {
@@ -256,22 +256,12 @@ void OperationsToolBar::Populate()
    rows->Add(controls, 0, wxEXPAND);
    Add(rows, 1, wxEXPAND);
 
-   mStatus->Bind(wxEVT_LEFT_DCLICK, [this](wxMouseEvent &) {
-      if (auto *dock = GetDock()) {
-         const auto width = dock->GetClientSize().x - GetPosition().x - 3;
-         if (width >= GetMinToolbarWidth()) {
-            SetSize(width, GetMinToolbarHeight());
-            Layout();
-            Updated();
-         }
-      }
-   });
    UpdateDisplay();
 }
 
 wxSize OperationsToolBar::GetDockedSize()
 {
-   return {GetSize().x, GetMinToolbarHeight()};
+   return {GetMinToolbarWidth(), GetMinToolbarHeight()};
 }
 
 int OperationsToolBar::GetMinToolbarWidth()

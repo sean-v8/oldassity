@@ -543,8 +543,7 @@ static struct DefaultConfigEntry {
    { wxT("Control"),           {},                     {}                },
    { wxT("Time"),              wxT("Control"),         {}                },
    { wxT("Selection"),         wxT("Time"),            {}                },
-   { wxT("Snapping"),          wxT("Selection"),       {}                },
-   { wxT("StackedMeters"),     wxT("Snapping"),        {}                },
+   { wxT("StackedMeters"),     wxT("Selection"),        {}                },
    { wxT("Operations"),        wxT("StackedMeters"),   {}                },
    { wxT("TimeSignature"),     {},                     wxT("Control")    },
 #ifdef EXPERIMENTAL_DA
@@ -908,16 +907,13 @@ void ToolManager::ReadConfig()
       auto &configuration = mBotDock->GetConfiguration();
       ToolBar *previous = nullptr;
       for (const auto *id : {wxT("Control"), wxT("Time"), wxT("Selection"),
-            wxT("Snapping"), wxT("StackedMeters"), wxT("Operations")}) {
+            wxT("StackedMeters"), wxT("Operations")}) {
          auto *bar = GetToolBar(id);
          if (!bar || bar->GetDock() != mBotDock || !bar->IsVisible())
             continue;
          configuration.Remove(bar);
          ToolBarConfiguration::Position position{previous, nullptr};
          position.adopt = false;
-         if (bar->GetSection() == wxT("Operations") &&
-             bar->GetSize().x > bar->GetInitialWidth())
-            bar->SetSize(bar->GetInitialWidth(), toolbarTriple);
          configuration.Insert(bar, position);
          previous = bar;
       }

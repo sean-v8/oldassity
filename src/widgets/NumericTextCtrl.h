@@ -18,7 +18,10 @@
 
 #include "MemoryX.h"
 #include "ComponentInterface.h"
+#include <functional>
 #include <vector>
+
+class wxMenu;
 #include <wx/setup.h> // for wxUSE_* macros
 #include <wx/defs.h>
 #include <wx/control.h> // to inherit
@@ -99,6 +102,9 @@ class AUDACITY_DLL_API NumericTextCtrl final
    wxSize GetDimensions() { return wxSize(mWidth + mButtonWidth, mHeight); }
    wxSize GetDigitSize() { return wxSize(mDigitBoxW, mDigitBoxH); }
    void SetDigitSize(int width, int height);
+   void UseCompactLabels() { mCompactLabels = true; }
+   void SetMenuExtension(std::function<void(wxMenu &)> extension)
+   { mMenuExtension = std::move(extension); }
    void SetReadOnly(bool readOnly = true);
    void EnableMenu(bool enable = true);
 
@@ -153,6 +159,8 @@ private:
    std::unique_ptr<wxBitmap> mBackgroundBitmap;
 
    std::unique_ptr<wxFont> mDigitFont, mLabelFont;
+   bool mCompactLabels{};
+   std::function<void(wxMenu &)> mMenuExtension;
    int            mDigitBoxW;
    int            mDigitBoxH;
    int            mDigitW;

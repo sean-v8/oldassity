@@ -233,6 +233,10 @@ public:
       AButtonStateCount
    };
 
+   void SetScalableImages(unsigned index,
+      const std::array<wxImage, AButtonStateCount> &frames,
+      const std::array<wxImage, AButtonStateCount> &icons);
+
    AButtonState GetState();
 
    void UseDisabledAsDownHiliteImage(bool flag);
@@ -271,6 +275,7 @@ public:
 
    wxImage mIcon;
    std::vector<std::array<wxImage, AButtonStateCount>> mImages;
+   std::vector<std::array<wxImage, AButtonStateCount>> mScalableIcons;
 
    wxRect mFocusRect;
    bool mForceFocusRect{false};

@@ -112,7 +112,7 @@ Identifier ControlToolBar::ID()
 // gets written to prefs and cannot be changed in prefs to maintain backwards
 // compatibility
 ControlToolBar::ControlToolBar( AudacityProject &project )
-: ToolBar(project, XO("Transport"), ID())
+: ToolBar(project, XO("Transport"), ID(), true)
 {
    mStrLocale = gPrefs->Read(wxT("/Locale/Language"), wxT(""));
 
@@ -155,10 +155,15 @@ void ControlToolBar::MakeAlternateImages(AButton &button, int idx,
                                          teBmps eEnabledDown,
                                          teBmps eDisabled)
 {
-   ToolBar::MakeAlternateImages(button, idx,
-      bmpRecoloredUpLarge, bmpRecoloredDownLarge, bmpRecoloredUpHiliteLarge, bmpRecoloredHiliteLarge,
-      eEnabledUp, eEnabledDown, eDisabled,
-      theTheme.ImageSize( bmpRecoloredUpLarge ));
+   std::array<wxImage, AButton::AButtonStateCount> frames, icons;
+   frames[AButton::AButtonUp] = frames[AButton::AButtonDis] = theTheme.Image(bmpRecoloredUpLarge);
+   frames[AButton::AButtonOver] = theTheme.Image(bmpRecoloredUpHiliteLarge);
+   frames[AButton::AButtonDown] = theTheme.Image(bmpRecoloredDownLarge);
+   frames[AButton::AButtonOverDown] = theTheme.Image(bmpRecoloredHiliteLarge);
+   icons[AButton::AButtonUp] = icons[AButton::AButtonOver] = theTheme.Image(eEnabledUp);
+   icons[AButton::AButtonDown] = icons[AButton::AButtonOverDown] = theTheme.Image(eEnabledDown);
+   icons[AButton::AButtonDis] = theTheme.Image(eDisabled);
+   button.SetScalableImages(idx, frames, icons);
 }
 
 void ControlToolBar::Populate()
@@ -168,9 +173,11 @@ void ControlToolBar::Populate()
 
    mPause = MakeButton(this, bmpPause, bmpPause, bmpPauseDisabled,
       ID_PAUSE_BUTTON,  true,  XO("Pause"));
+   MakeAlternateImages(*mPause, 0, bmpPause, bmpPause, bmpPauseDisabled);
 
    mPlay = MakeButton(this, bmpPlay, bmpPlay, bmpPlayDisabled,
       ID_PLAY_BUTTON, true, XO("Play"));
+   MakeAlternateImages(*mPlay, 0, bmpPlay, bmpPlay, bmpPlayDisabled);
    // 3.1.0 abandoned distinct images for Shift
    MakeAlternateImages(*mPlay, 1, bmpPlay, bmpPlay, bmpPlayDisabled);
    MakeAlternateImages(*mPlay, 2,
@@ -183,15 +190,19 @@ void ControlToolBar::Populate()
 
    mStop = MakeButton(this, bmpStop, bmpStop, bmpStopDisabled ,
       ID_STOP_BUTTON, false, XO("Stop"));
+   MakeAlternateImages(*mStop, 0, bmpStop, bmpStop, bmpStopDisabled);
 
    mRewind = MakeButton(this, bmpRewind, bmpRewind, bmpRewindDisabled,
       ID_REW_BUTTON, false, XO("Skip to Start"));
+   MakeAlternateImages(*mRewind, 0, bmpRewind, bmpRewind, bmpRewindDisabled);
 
    mFF = MakeButton(this, bmpFFwd, bmpFFwd, bmpFFwdDisabled,
       ID_FF_BUTTON, false, XO("Skip to End"));
+   MakeAlternateImages(*mFF, 0, bmpFFwd, bmpFFwd, bmpFFwdDisabled);
 
    mRecord = MakeButton(this, bmpRecord, bmpRecord, bmpRecordDisabled,
       ID_RECORD_BUTTON, false, XO("Record"));
+   MakeAlternateImages(*mRecord, 0, bmpRecord, bmpRecord, bmpRecordDisabled);
 
    bool bPreferNewTrack;
    gPrefs->Read("/GUI/PreferNewTrackRecord",&bPreferNewTrack, false);
@@ -208,6 +219,7 @@ void ControlToolBar::Populate()
       ID_LOOP_BUTTON,
       true, // this makes it a toggle, like the pause button
       LoopToggleText.Stripped());
+   MakeAlternateImages(*mLoop, 0, bmpLoop, bmpLoop, bmpLoopDisabled);
 
 #if wxUSE_TOOLTIPS
    RegenerateTooltips();
@@ -330,7 +342,7 @@ void ControlToolBar::UpdatePrefs()
 
 void ControlToolBar::ArrangeButtons()
 {
-   int flags = wxALIGN_CENTER | wxRIGHT;
+   int flags = wxEXPAND | wxRIGHT | wxTOP | wxBOTTOM;
 
    // (Re)allocate the button sizer
    if( mSizer )
@@ -342,7 +354,11 @@ void ControlToolBar::ArrangeButtons()
    Add((mSizer = safenew wxBoxSizer(wxHORIZONTAL)), 1, wxEXPAND);
 
    // Start with a little extra space
-   mSizer->Add( 5, 55 );
+   mSizer->Add(5, 0);
+   for (auto *button : {mPause, mPlay, mStop, mRewind, mFF, mRecord, mLoop}) {
+      button->SetMinSize({28, 28});
+      button->SetMaxSize(wxDefaultSize);
+   }
 
    // Establish correct tab key sequence with mLoop last
    mPause->MoveBeforeInTabOrder( mLoop );
@@ -352,13 +368,13 @@ void ControlToolBar::ArrangeButtons()
    mFF->MoveBeforeInTabOrder( mLoop );
    mRecord->MoveBeforeInTabOrder( mLoop );
 
-   mSizer->Add( mPause,  0, flags, 2 );
-   mSizer->Add( mPlay,   0, flags, 2 );
-   mSizer->Add( mStop,   0, flags, 2 );
-   mSizer->Add( mRewind, 0, flags, 2 );
-   mSizer->Add( mFF,     0, flags, 10 );
-   mSizer->Add( mRecord, 0, flags, 10 );
-   mSizer->Add( mLoop, 0, flags, 5 );
+   mSizer->Add( mPause,  1, flags, 2 );
+   mSizer->Add( mPlay,   1, flags, 2 );
+   mSizer->Add( mStop,   1, flags, 2 );
+   mSizer->Add( mRewind, 1, flags, 2 );
+   mSizer->Add( mFF,     1, flags, 2 );
+   mSizer->Add( mRecord, 1, flags, 2 );
+   mSizer->Add( mLoop, 1, flags, 2 );
 
    // Layout the sizer
    mSizer->Layout();
@@ -366,8 +382,6 @@ void ControlToolBar::ArrangeButtons()
    // Layout the toolbar
    Layout();
 
-   // (Re)Establish the minimum size
-   SetMinSize( GetSizer()->GetMinSize() );
 }
 
 void ControlToolBar::ReCreateButtons()

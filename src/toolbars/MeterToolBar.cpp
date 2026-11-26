@@ -131,7 +131,7 @@ Identifier MeterToolBar::ID()
 }
 
 MeterToolBar::MeterToolBar(AudacityProject &project)
-   : ToolBar(project, XO("Playback and Recording Meters"), ID(), true)
+   : ToolBar(project, XO("Meters"), ID(), true)
 {
 }
 
@@ -295,7 +295,7 @@ void MeterToolBar::UpdatePrefs()
 {
    RegenerateTooltips();
 
-   SetLabel(XO("Playback and Recording Meters"));
+   SetLabel(XO("Meters"));
 
    // Give base class a chance
    ToolBar::UpdatePrefs();
@@ -386,7 +386,7 @@ static RegisteredToolbarFactory factory{
 namespace {
 AttachedToolBarMenuItem sAttachment{
    MeterToolBar::ID(), wxT("ShowStackedMetersTB"),
-   XXO("Playback and Recording &Meters Toolbar"), {}
+   XXO("&Meters Toolbar"), {}
 };
 }
 
