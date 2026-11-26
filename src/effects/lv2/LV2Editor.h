@@ -97,6 +97,8 @@ public:
 
    void OnIdle(wxIdleEvent & evt);
    void UpdateGraphicalUI();
+   void SendControlChanges(const LV2EffectOutputs *outputs);
+   bool UseIdleGraph() const;
    void OnSize(wxSizeEvent & evt);
 
    static std::shared_ptr<SuilHost> GetSuilHost();
@@ -107,6 +109,9 @@ public:
    const EffectOutputs *mpOutputs{};
    const double mSampleRate;
    const LV2Ports &mPorts;
+   const LV2FeaturesList &mFeatures;
+   struct IdleGraph;
+   std::unique_ptr<IdleGraph> mpIdleGraph;
    std::unique_ptr<LV2Wrapper> mpWrapper;
    std::optional<const LV2UIFeaturesList> mUIFeatures;
    LV2PortUIStates mPortUIStates;

@@ -26,6 +26,10 @@
 #include "LV2EffectMeter.h"
 #include "LV2Instance.h"
 #include "LV2Wrapper.h"
+#include "ProjectWindowBase.h"
+#include "RealtimeEffectManager.h"
+
+#include <algorithm>
 
 #include "ShuttleGui.h"
 
@@ -102,6 +106,62 @@ void LV2Editor::UI::Destroy()
 #endif
 }
 
+// The LSP EQ publishes its response mesh from process(), which requires a
+// nonempty block. This instance and its buffers belong only to the UI thread.
+struct LV2Editor::IdleGraph {
+   IdleGraph(const LV2FeaturesList &base, const LV2Ports &ports,
+      const LV2EffectSettings &settings, double sampleRate)
+      : features{ base }, states{ ports }, uiStates{ states, ports }
+   {
+      if (!features.mOk || !uiStates.mControlIn || !uiStates.mControlOut)
+         return;
+
+      features.mBlockSize = std::clamp<size_t>(64,
+         features.mMinBlockSize, features.mMaxBlockSize);
+      features.mSampleRate = sampleRate;
+      controls.values = settings.values;
+      outputs.values.resize(ports.mControlPorts.size());
+      audio.resize(ports.mAudioPorts.size());
+      for (auto &buffer : audio)
+         buffer.resize(features.mBlockSize);
+      for (auto &state : states.mCVPortStates)
+         state.mBuffer.reinit(features.mBlockSize, state.mpPort->mIsInput);
+
+      lv2_atom_forge_init(&forge, base.URIDMapFeature());
+      wrapper = LV2Wrapper::Create(features, ports, states, controls,
+         sampleRate, &outputs);
+      if (!wrapper)
+         return;
+      auto &instance = wrapper->GetInstance();
+      for (size_t i = 0; i < audio.size(); ++i)
+         lilv_instance_connect_port(&instance, ports.mAudioPorts[i]->mIndex,
+            audio[i].data());
+      wrapper->Activate();
+   }
+
+   void Refresh(const LV2EffectSettings &settings)
+   {
+      // Keep the addresses connected to the control ports stable.
+      assert(controls.values.size() == settings.values.size());
+      std::copy(settings.values.begin(), settings.values.end(),
+         controls.values.begin());
+      for (auto &state : states.mAtomPortStates)
+         state->SendToInstance(forge, 0, 0.0f);
+      lilv_instance_run(&wrapper->GetInstance(), features.mBlockSize);
+      wrapper->ConsumeResponses();
+      uiStates.mControlOut->ReceiveFromInstance();
+   }
+
+   LV2InstanceFeaturesList features;
+   LV2PortStates states;
+   LV2PortUIStates uiStates;
+   LV2EffectSettings controls;
+   LV2EffectOutputs outputs;
+   std::vector<std::vector<float>> audio;
+   LV2_Atom_Forge forge{};
+   std::unique_ptr<LV2Wrapper> wrapper;
+};
+
 LV2Editor::LV2Editor(const StatelessEffectUIServices &effect, EffectType type,
    const LilvPlugin &plug, LV2Instance &instance,
    EffectSettingsAccess &access, const EffectOutputs *pOutputs,
@@ -115,6 +175,7 @@ LV2Editor::LV2Editor(const StatelessEffectUIServices &effect, EffectType type,
    , mpOutputs{ pOutputs }
    , mSampleRate{ sampleRate }
    , mPorts{ ports }
+   , mFeatures{ features }
    , mPortUIStates{ instance.GetPortStates(), ports }
    , mParent{ parent }
    , mUseGUI{ useGUI }
@@ -183,6 +244,7 @@ void LV2Editor::Disconnect()
       mParent = nullptr;
    }
    mUI.Destroy();
+   mpIdleGraph.reset();
 }
 
 LV2Editor::~LV2Editor()
@@ -320,6 +382,14 @@ bool LV2Editor::BuildFancy(
    // callback functions, which were given to suil_host_new:
    UIHandler *pHandler = this;
 
+   if (mpOutputs &&
+       pluginUri.rfind("http://lsp-plug.in/plugins/lv2/para_equalizer_", 0) == 0) {
+      auto graph = std::make_unique<IdleGraph>(
+         mFeatures, mPorts, GetSettings(settings), mSampleRate);
+      if (graph->wrapper)
+         mpIdleGraph = std::move(graph);
+   }
+
    // Reassign the sample rate, which is pointed to by options, which are
    // pointed to by features, before we tell the library the features
    mUI.mSuilInstance.reset(suil_instance_new(mSuilHost.get(),
@@ -330,8 +400,10 @@ bool LV2Editor::BuildFancy(
       features.GetFeaturePointers().data()));
 
    // Bail if the instance (no compatible UI) couldn't be created
-   if (!mUI.mSuilInstance)
+   if (!mUI.mSuilInstance) {
+      mpIdleGraph.reset();
       return false;
+   }
 
    if (uiType == node_ExternalUI) {
       mParent->SetMinSize(wxDefaultSize);
@@ -828,19 +900,38 @@ void LV2Editor::Timer::Notify()
    mEditor.UpdateGraphicalUI();
 }
 
+bool LV2Editor::UseIdleGraph() const
+{
+   if (mpIdleGraph)
+      if (auto *project = FindProjectFromWindow(mParent))
+         return RealtimeEffectManager::Get(*project).GetSuspended();
+   return false;
+}
+
 void LV2Editor::UpdateGraphicalUI()
 {
    if (!mUI.mSuilInstance)
       return;
 
    if (!mExternalUIClosed) {
-      if (auto &atomState = mPortUIStates.mControlOut) {
-         atomState->SendToDialog([&](const LV2_Atom *atom, uint32_t size){
-            suil_instance_port_event(mUI.mSuilInstance.get(),
-               atomState->mpPort->mIndex, size,
-               LV2Symbols::urid_EventTransfer, atom);
-         });
+      const auto sendAtoms = [&](const LV2AtomPortStatePtr &atomState) {
+         if (atomState)
+            atomState->SendToDialog([&](const LV2_Atom *atom, uint32_t size){
+               suil_instance_port_event(mUI.mSuilInstance.get(),
+                  atomState->mpPort->mIndex, size,
+                  LV2Symbols::urid_EventTransfer, atom);
+            });
+      };
+
+      if (UseIdleGraph()) {
+         // Discard any realtime messages still queued at the pause boundary.
+         mPortUIStates.mControlOut->SendToDialog([](const LV2_Atom *, uint32_t){});
+         mpIdleGraph->Refresh(GetSettings(mAccess.Get()));
+         SendControlChanges(&mpIdleGraph->outputs);
+         sendAtoms(mpIdleGraph->uiStates.mControlOut);
       }
+      else
+         sendAtoms(mPortUIStates.mControlOut);
 
       if (mTimer.mExternalWidget)
          LV2_EXTERNAL_UI_RUN(mTimer.mExternalWidget);
@@ -867,18 +958,17 @@ void LV2Editor::UpdateGraphicalUI()
 void LV2Editor::OnIdle(wxIdleEvent &evt)
 {
    evt.Skip();
-   if (!mUI.mSuilInstance)
+   if (!mUI.mSuilInstance || UseIdleGraph())
       return;
 
-   auto &portUIStates = mPortUIStates;
-
-   // Is this idle time polling for changes of input redundant with
-   // TransferDataToWindow or is it really needed?  Probably harmless.
-   // In case of output control port values though, it is needed for metering.
    mAccess.Flush();
-   auto& values = GetSettings(mAccess.Get()).values;
-   auto pOutputValues = static_cast<const LV2EffectOutputs *>(mpOutputs);
+   SendControlChanges(static_cast<const LV2EffectOutputs *>(mpOutputs));
+}
 
+void LV2Editor::SendControlChanges(const LV2EffectOutputs *pOutputValues)
+{
+   auto &portUIStates = mPortUIStates;
+   const auto &values = GetSettings(mAccess.Get()).values;
    size_t index = 0; for (auto &state : portUIStates.mControlPortStates) {
       auto &port = state.mpPort;
 
@@ -1011,8 +1101,11 @@ void LV2Editor::suil_port_write(uint32_t port_index,
    else if (protocol == LV2Symbols::urid_EventTransfer) {
       auto &portUIStates = mPortUIStates;
       auto &atomPortState = portUIStates.mControlIn;
-      if (atomPortState && port_index == atomPortState->mpPort->mIndex)
+      if (atomPortState && port_index == atomPortState->mpPort->mIndex) {
          atomPortState->ReceiveFromDialog(buffer, buffer_size);
+         if (mpIdleGraph)
+            mpIdleGraph->uiStates.mControlIn->ReceiveFromDialog(buffer, buffer_size);
+      }
    }
 }
 
