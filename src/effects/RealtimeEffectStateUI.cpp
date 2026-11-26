@@ -217,6 +217,12 @@ void RealtimeEffectStateUI::UpdateTrackData(const Track& track)
    UpdateTitle();
 }
 
+void RealtimeEffectStateUI::UpdateMasterData()
+{
+   mTrackName = _("Master");
+   UpdateTitle();
+}
+
 RealtimeEffectStateUI& RealtimeEffectStateUI::Get(RealtimeEffectState& state)
 {      
    return state.Get<RealtimeEffectStateUI&>(realtimeEffectStateUIFactory);

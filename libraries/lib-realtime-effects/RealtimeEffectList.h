@@ -31,7 +31,8 @@ struct RealtimeEffectListMessage final
       WillReplace,///<Effect item will be replaced with a new item at srcIndex position. affectedState is the state to be replaced.
       DidReplace,///<Effect item was replaced with a new item at srcIndex position. affectedState is an old state.
       Remove,///<Effect item was removed from the list at srcIndex position. affectedState is removed state.
-      Move ///<Item position has changed, from srcIndex to dstIndex.  affectedState is the moved state
+      Move, ///<Item position has changed, from srcIndex to dstIndex. affectedState is the moved state
+      Reset ///<The project effect stack was restored from history
    };
    Type type;
    size_t srcIndex;
@@ -67,9 +68,6 @@ public:
 
    static RealtimeEffectList &Get(AudacityProject &project);
    static const RealtimeEffectList &Get(const AudacityProject &project);
-   static RealtimeEffectList &Set(
-      AudacityProject &project,
-      const std::shared_ptr<RealtimeEffectList> &list);
 
    static RealtimeEffectList &Get(ChannelGroup &group);
    static const RealtimeEffectList &Get(const ChannelGroup &group);
@@ -153,7 +151,7 @@ public:
    //! Use only in the main thread, to avoid races
    void WriteXML(XMLWriter &xmlFile) const;
 
-   void RestoreUndoRedoState(AudacityProject &project) noexcept override;
+   void RestoreUndoRedoState(AudacityProject &project) override;
 
    //! Non-blocking atomic boolean load
    bool IsActive() const;

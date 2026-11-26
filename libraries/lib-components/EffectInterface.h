@@ -551,6 +551,12 @@ public:
     */
    virtual bool RealtimeFinalize(EffectSettings &settings) noexcept;
 
+   //! A fixed lookahead that is maintained even when bypassed. Zero for
+   //! effects that don't opt into latency-aware playback.
+   virtual size_t GetRealtimeLookahead(double) const { return 0; }
+   //! Reset a lookahead processor after a seek, without allocating.
+   virtual void RealtimeReset(const EffectSettings &) noexcept {}
+
    //! Function that has not yet found a use
    //! Correct definitions of it will likely depend on settings and state
    virtual size_t GetTailSize() const;

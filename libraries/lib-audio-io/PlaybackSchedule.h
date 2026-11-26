@@ -172,6 +172,9 @@ struct AUDIO_IO_API PlaybackSchedule {
    /// mTime), and wrapping back to zero each time around looping play.
    /// Thus, it is the length in real seconds between mT0 and mTime.
    double              mWarpedTime;
+   //! Additional zero input to drain fixed-lookahead realtime effects.
+   //! Accessed only by the worker filling the playback buffers.
+   size_t              mRealtimeLookahead{};
 
    /// Real length to be played (if looping, for each pass) after warping via a
    /// time track, computed just once when starting the stream.

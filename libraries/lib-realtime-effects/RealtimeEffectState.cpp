@@ -422,7 +422,6 @@ RealtimeEffectState::Initialize(double sampleRate)
 
    mCurrentProcessor = 0;
    mGroups.clear();
-   mLatency = {};
    return EnsureInstance(sampleRate);
 }
 
@@ -456,9 +455,9 @@ void AllocateChannelsToProcessors(
 /*! The iteration over channels in AddGroup and Process must be the same */
 std::shared_ptr<EffectInstance>
 RealtimeEffectState::AddGroup(
-   const ChannelGroup &group, unsigned chans, float sampleRate)
+   const ChannelGroup *group, unsigned chans, float sampleRate)
 {
-   assert(group.IsLeader());
+   assert(!group || group->IsLeader());
    auto pInstance = EnsureInstance(sampleRate);
    if (!pInstance)
       return {};
@@ -482,10 +481,28 @@ RealtimeEffectState::AddGroup(
    if (mCurrentProcessor > first) {
       // Remember the sampleRate of the group, so latency can be computed
       // later
-      mGroups[&group] = { first, sampleRate };
+      mGroups[group] = { first, sampleRate, {} };
       return pInstance;
    }
    return {};
+}
+
+size_t RealtimeEffectState::GetRealtimeLookahead(double rate) const
+{
+   if (const auto instance = mwInstance.lock())
+      return instance->GetRealtimeLookahead(rate);
+   return 0;
+}
+
+void RealtimeEffectState::ResetRealtimeLookahead()
+{
+   if (const auto instance = mwInstance.lock();
+       instance && !mGroups.empty() &&
+          instance->GetRealtimeLookahead(mGroups.begin()->second.rate)) {
+      instance->RealtimeReset(mWorkerSettings.settings);
+      for (auto &entry : mGroups)
+         entry.second.latency.reset();
+   }
 }
 
 bool RealtimeEffectState::ProcessStart(bool running)
@@ -534,12 +551,14 @@ bool RealtimeEffectState::ProcessStart(bool running)
 //! Visit the effect processors that were added in AddGroup
 /*! The iteration over channels in AddGroup and Process must be the same */
 size_t RealtimeEffectState::Process(
-   const ChannelGroup &group, unsigned chans,
+   const ChannelGroup *group, unsigned chans,
    const float *const *inbuf, float *const *outbuf, float *const dummybuf,
    size_t numSamples)
 {
    auto pInstance = mwInstance.lock();
-   if (!mPlugin || !pInstance || !mLastActive) {
+   const auto found = mGroups.find(group);
+   if (!mPlugin || !pInstance || found == mGroups.end() ||
+       (!mLastActive && !pInstance->GetRealtimeLookahead(found->second.rate))) {
       // Process trivially
       for (size_t ii = 0; ii < chans; ++ii)
          memcpy(outbuf[ii], inbuf[ii], numSamples * sizeof(float));
@@ -550,8 +569,8 @@ size_t RealtimeEffectState::Process(
    const auto clientIn = stackAllocate(const float *, numAudioIn);
    const auto clientOut = stackAllocate(float *, numAudioOut);
    size_t len = 0;
-   const auto &pair = mGroups[&group];
-   auto processor = pair.first;
+   auto &processorGroup = found->second;
+   auto processor = processorGroup.first;
    // Outer loop over processors
    AllocateChannelsToProcessors(chans, numAudioIn, numAudioOut,
    [&](unsigned indx, unsigned ondx){
@@ -581,11 +600,11 @@ size_t RealtimeEffectState::Process(
          // Assuming we are in a processing scope, use the worker settings
          auto processed = pInstance->RealtimeProcess(processor,
             mWorkerSettings.settings, clientIn, clientOut, cnt);
-         if (!mLatency)
+         if (!processorGroup.latency)
             // Find latency once only per initialization scope,
             // after processing one block
-            mLatency.emplace(
-               pInstance->GetLatency(mWorkerSettings.settings, pair.second));
+            processorGroup.latency.emplace(
+               pInstance->GetLatency(mWorkerSettings.settings, processorGroup.rate));
          for (size_t i = 0 ; i < numAudioIn; i++)
             if (clientIn[i])
                clientIn[i] += cnt;
@@ -595,9 +614,9 @@ size_t RealtimeEffectState::Process(
          if (ondx == 0) {
             // For the first processor only
             len += processed;
-            auto discard = limitSampleBufferSize(len, *mLatency);
+            auto discard = limitSampleBufferSize(len, *processorGroup.latency);
             len -= discard;
-            *mLatency -= discard;
+            *processorGroup.latency -= discard;
          }
       }
       ++processor;
@@ -696,7 +715,6 @@ bool RealtimeEffectState::Finalize() noexcept
    }
 
    auto result = pInstance->RealtimeFinalize(mMainSettings.settings);
-   mLatency = {};
    mInitialized = false;
    return result;
 }

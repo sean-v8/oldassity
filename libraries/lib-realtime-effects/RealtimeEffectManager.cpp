@@ -51,11 +51,14 @@ bool RealtimeEffectManager::IsActive() const noexcept
 }
 
 void RealtimeEffectManager::Initialize(
-   RealtimeEffects::InitializationScope &scope, double sampleRate)
+   RealtimeEffects::InitializationScope &scope,
+   unsigned numPlaybackChannels,
+   double sampleRate)
 {
    // (Re)Set processor parameters
    mRates.clear();
    mGroups.clear();
+   mMasterRate = sampleRate;
 
    // RealtimeAdd/RemoveEffect() needs to know when we're active so it can
    // initialize newly added effects
@@ -68,6 +71,10 @@ void RealtimeEffectManager::Initialize(
 
    // Leave suspended state
    SetSuspended(false);
+
+   VisitGroup(MasterGroup, [&](RealtimeEffectState& state, bool) {
+      scope.mInstances.push_back(state.AddGroup(MasterGroup, numPlaybackChannels, sampleRate));
+   });
 }
 
 void RealtimeEffectManager::AddGroup(
@@ -78,9 +85,9 @@ void RealtimeEffectManager::AddGroup(
    mGroups.push_back(&group);
    mRates.insert({&group, rate});
 
-   VisitGroup(group,
+   VisitGroup(&group,
       [&](RealtimeEffectState & state, bool) {
-         scope.mInstances.push_back(state.AddGroup(group, chans, rate));
+         scope.mInstances.push_back(state.AddGroup(&group, chans, rate));
       }
    );
 }
@@ -89,9 +96,6 @@ void RealtimeEffectManager::Finalize() noexcept
 {
    // Reenter suspended state
    SetSuspended(true);
-
-   // Assume it is now safe to clean up
-   mLatency = std::chrono::microseconds(0);
 
    VisitAll([](RealtimeEffectState &state, bool){ state.Finalize(); });
 
@@ -106,6 +110,26 @@ void RealtimeEffectManager::Finalize() noexcept
 //
 // This will be called in a different thread than the main GUI thread.
 //
+size_t RealtimeEffectManager::GetRealtimeLookahead()
+{
+   const auto lookahead = [&](const ChannelGroup *group, double rate) {
+      size_t frames = 0;
+      VisitGroup(group, [&](RealtimeEffectState &state, bool) {
+         frames += state.GetRealtimeLookahead(rate);
+      });
+      return frames;
+   };
+   size_t result = 0;
+   for (const auto *group : mGroups)
+      result = std::max(result, lookahead(group, mRates.at(group)));
+   return result + lookahead(MasterGroup, mMasterRate);
+}
+
+void RealtimeEffectManager::ResetRealtimeLookahead()
+{
+   VisitAll([](RealtimeEffectState &state, bool) { state.ResetRealtimeLookahead(); });
+}
+
 void RealtimeEffectManager::ProcessStart(bool suspended)
 {
    // Can be suspended because of the audio stream being paused or because
@@ -115,12 +139,10 @@ void RealtimeEffectManager::ProcessStart(bool suspended)
    });
 }
 
-//
-
 // This will be called in a thread other than the main GUI thread.
 //
 size_t RealtimeEffectManager::Process(bool suspended,
-   const ChannelGroup &group,
+   const ChannelGroup *group,
    float *const *buffers, float *const *scratch, float *const dummy,
    unsigned nBuffers, size_t numSamples)
 {
@@ -128,10 +150,6 @@ size_t RealtimeEffectManager::Process(bool suspended,
    // effects have been suspended, so allow the samples to pass as-is.
    if (suspended)
       return 0;
-
-   // Remember when we started so we can calculate the amount of latency we
-   // are introducing
-   auto start = std::chrono::steady_clock::now();
 
    // Allocate the in and out buffer arrays
    const auto ibuf =
@@ -151,13 +169,24 @@ size_t RealtimeEffectManager::Process(bool suspended,
    // Tracks how many processors were called
    size_t called = 0;
    size_t discardable = 0;
+   size_t remaining = numSamples;
    VisitGroup(group,
       [&](RealtimeEffectState &state, bool)
       {
-         discardable +=
-            state.Process(group, nBuffers, ibuf, obuf, dummy, numSamples);
-         for (auto i = 0; i < nBuffers; ++i)
+         if (!remaining)
+            return;
+         const auto prefix = std::min(
+            state.Process(group, nBuffers, ibuf, obuf, dummy, remaining),
+            remaining);
+         // The next processor must see only the preceding processor's
+         // valid output. Retain the prefix offset for the ring-buffer trim.
+         for (auto i = 0; i < nBuffers; ++i) {
+            ibuf[i] += prefix;
+            obuf[i] += prefix;
             std::swap(ibuf[i], obuf[i]);
+         }
+         discardable += prefix;
+         remaining -= prefix;
          called++;
       }
    );
@@ -166,13 +195,9 @@ size_t RealtimeEffectManager::Process(bool suspended,
    // in the temporary buffers.  If that's the case, we need to copy it over to
    // the caller's buffers.  This happens when the number of effects processed
    // is odd.
-   if (called & 1)
+   if ((called & 1) && remaining)
       for (unsigned int i = 0; i < nBuffers; i++)
-         memcpy(buffers[i], ibuf[i], numSamples * sizeof(float));
-
-   // Remember the latency
-   auto end = std::chrono::steady_clock::now();
-   mLatency = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+         memcpy(buffers[i] + discardable, ibuf[i], remaining * sizeof(float));
 
    //
    // This is wrong...needs to handle tails
@@ -248,17 +273,26 @@ RealtimeEffectManager::MakeNewState(
       // Adding a state while playback is in-flight
       auto pInstance = state.Initialize(pScope->mSampleRate);
       pScope->mInstances.push_back(pInstance);
-      for (const auto group : mGroups) {
-         // Add all groups to a per-project state, but add only the same
-         // group to a state in the per-group list
-         if (pGroup && pGroup != group)
-            continue;
-         auto rate = mRates[group];
-         auto pInstance2 =
-            state.AddGroup(*group, pScope->mNumPlaybackChannels, rate);
-         if (pInstance2 != pInstance)
+
+      if(pGroup == MasterGroup)
+      {
+         auto pInstance2 = state.AddGroup(MasterGroup, pScope->mNumPlaybackChannels, pScope->mSampleRate);
+         if(pInstance2 != pInstance)
             pScope->mInstances.push_back(pInstance2);
       }
+      else
+      {
+         for (const auto group : mGroups) {
+            if (pGroup != group)
+               continue;
+            auto pInstance2 =
+               state.AddGroup(group, pScope->mNumPlaybackChannels, mRates[group]);
+            if (pInstance2 != pInstance)
+               pScope->mInstances.push_back(pInstance2);
+         }
+      }
+
+
    }
    return pNewState;
 }
@@ -287,7 +321,7 @@ std::shared_ptr<RealtimeEffectState> RealtimeEffectManager::AddState(
       return nullptr;
    Publish({
       RealtimeEffectManagerMessage::Type::EffectAdded,
-      pGroup ? pGroup : nullptr
+      pGroup ? pGroup : MasterGroup
    });
    return pState;
 }
@@ -329,7 +363,7 @@ void RealtimeEffectManager::RemoveState(
       pState->Finalize();
    Publish({
       RealtimeEffectManagerMessage::Type::EffectRemoved,
-      pGroup ? pGroup : nullptr
+      pGroup ? pGroup : MasterGroup
    });
 }
 
@@ -340,11 +374,3 @@ std::optional<size_t> RealtimeEffectManager::FindState(
    auto &states = FindStates(mProject, pGroup);
    return states.FindState(pState);
 }
-
-// Where is this used?
-#if 0
-auto RealtimeEffectManager::GetLatency() const -> Latency
-{
-   return mLatency; // should this be atomic?
-}
-#endif

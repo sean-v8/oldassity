@@ -45,27 +45,24 @@ initVector(size_t dim1, size_t dim2)
 
 namespace {
 // Find a block size acceptable to all stages; side-effects on instances
-size_t FindBufferSize(const Mixer::Inputs &inputs, size_t bufferSize)
+size_t FindBufferSize(const Mixer::Inputs &inputs, const Mixer::Stages &master,
+   size_t bufferSize)
 {
    size_t blockSize = bufferSize;
-   for (const auto &input : inputs) {
-      const auto sequence = input.pSequence.get();
-      const auto nInChannels = sequence->NChannels();
-      if (!sequence) {
-         assert(false);
-         break;
+   const auto consider = [&](const Mixer::Stages &stages) {
+      for (const auto &stage : stages) {
+         auto instance = stage.factory();
+         if (instance)
+            blockSize = std::min(blockSize, instance->SetBlockSize(blockSize));
+         stage.mpFirstInstance = std::move(instance);
       }
-      for (const auto &stage : input.stages) {
-         // Need an instance to query acceptable block size
-         const auto pInstance = stage.factory();
-         if (pInstance)
-            blockSize = std::min(blockSize, pInstance->SetBlockSize(blockSize));
-         // Cache the first factory call
-         stage.mpFirstInstance = move(pInstance);
-      }
-   }
+   };
+   for (const auto &input : inputs)
+      consider(input.stages);
+   consider(master);
    return blockSize;
 }
+
 }
 
 Mixer::Mixer(Inputs inputs,
@@ -76,10 +73,10 @@ Mixer::Mixer(Inputs inputs,
    const size_t outBufferSize, const bool outInterleaved,
    double outRate, sampleFormat outFormat,
    const bool highQuality, MixerSpec *const mixerSpec,
-   const bool applyTrackGains
+   const bool applyTrackGains, Stages masterEffects
 )  : mNumChannels{ numOutChannels }
    , mInputs{ move(inputs) }
-   , mBufferSize{ FindBufferSize(mInputs, outBufferSize) }
+   , mBufferSize{ FindBufferSize(mInputs, masterEffects, outBufferSize) }
    , mApplyTrackGains{ applyTrackGains }
    , mHighQuality{ highQuality }
    , mFormat{ outFormat }
@@ -131,8 +128,8 @@ Mixer::Mixer(Inputs inputs,
    const auto nStages = std::accumulate(mInputs.begin(), mInputs.end(), 0,
       [](auto sum, const auto &input){
          return sum + input.stages.size() * input.pSequence->NChannels(); });
-   mSettings.reserve(nStages);
-   mStageBuffers.reserve(nStages);
+   mSettings.reserve(nStages + masterEffects.size());
+   mStageBuffers.reserve(nStages + masterEffects.size());
 
    size_t i = 0;
    for (auto &input : mInputs) {
@@ -162,9 +159,9 @@ Mixer::Mixer(Inputs inputs,
                : stage.factory();
          };
          auto &pNewDownstream =
-         mStages.emplace_back(EffectStage::Create(-1,
+         mStages.emplace_back(EffectStage::Create(-1, sequence->NChannels(),
             *pDownstream, stageInput,
-            factory, settings, outRate, std::nullopt, *sequence
+            factory, settings, outRate, std::nullopt
          ));
          if (pNewDownstream)
             pDownstream = pNewDownstream.get();
@@ -176,6 +173,32 @@ Mixer::Mixer(Inputs inputs,
          }
       }
       mDecoratedSources.emplace_back(Source{ source, *pDownstream });
+   }
+
+   AudioGraph::Source *master = this;
+   for (const auto &stage : masterEffects) {
+      auto &settings = mSettings.emplace_back(stage.settings);
+      auto &input = mStageBuffers.emplace_back(std::max(3u, mNumChannels + 1),
+         mBufferSize, 1);
+      auto factory = [&stage] {
+         return stage.mpFirstInstance ? std::move(stage.mpFirstInstance) : stage.factory();
+      };
+      if (stage.mpFirstInstance)
+         needsDither |= stage.mpFirstInstance->NeedsDither();
+      auto effect = EffectStage::Create(-1, mNumChannels, *master, input, factory,
+         settings, outRate, std::nullopt);
+      if (effect) {
+         master = effect.get();
+         mStages.push_back(std::move(effect));
+      }
+      else {
+         mStageBuffers.pop_back();
+         mSettings.pop_back();
+      }
+   }
+   if (master != this) {
+      mMasterOutput = master;
+      mMasterBuffer.emplace(std::max(3u, mNumChannels + 1), mBufferSize, 1);
    }
 
    // Decide once at construction time
@@ -268,7 +291,7 @@ static void MixBuffers(unsigned numChannels,
 
 #define stackAllocate(T, count) static_cast<T*>(alloca(count * sizeof(T)))
 
-size_t Mixer::Process(const size_t maxToProcess)
+std::optional<size_t> Mixer::MixInputs(const size_t maxToProcess)
 {
    assert(maxToProcess <= BufferSize());
 
@@ -319,7 +342,7 @@ size_t Mixer::Process(const size_t maxToProcess)
       // are the sources for the CopySamples calls, and they copy into
       // mBuffer[*][*]
       if (!oResult)
-         return 0;
+         return {};
       auto result = *oResult;
       maxOut = std::max(maxOut, result);
 
@@ -352,18 +375,67 @@ size_t Mixer::Process(const size_t maxToProcess)
    else
       mTime = std::clamp(mTime, oldTime, mT1);
 
+   return maxOut;
+}
+
+bool Mixer::AcceptsBuffers(const Buffers &buffers) const
+{
+   return buffers.Channels() >= mNumChannels && AcceptsBlockSize(buffers.BlockSize());
+}
+
+bool Mixer::AcceptsBlockSize(size_t size) const
+{
+   return size <= BufferSize();
+}
+
+std::optional<size_t> Mixer::Acquire(Buffers &data, size_t bound)
+{
+   const auto count = MixInputs(bound);
+   if (!count)
+      return {};
+   for (size_t channel = 0; channel < mNumChannels; ++channel)
+      std::copy_n(mTemp[channel].data(), *count, data.Positions()[channel]);
+   return count;
+}
+
+sampleCount Mixer::Remaining() const
+{
+   sampleCount remaining{};
+   for (const auto &source : mDecoratedSources)
+      remaining = std::max(remaining, source.downstream.Remaining());
+   return remaining;
+}
+
+bool Mixer::Release()
+{
+   return true;
+}
+
+size_t Mixer::Process(const size_t maxToProcess)
+{
+   const auto count = mMasterOutput ? mMasterOutput->Acquire(*mMasterBuffer, maxToProcess)
+                                   : MixInputs(maxToProcess);
+   if (!count)
+      return 0;
+   const auto maxOut = *count;
    const auto dstStride = (mInterleaved ? mNumChannels : 1);
    auto ditherType = mNeedsDither
       ? (mHighQuality ? gHighQualityDither : gLowQualityDither)
       : DitherType::none;
    for (size_t c = 0; c < mNumChannels; ++c)
-      CopySamples((constSamplePtr)mTemp[c].data(), floatSample,
+      CopySamples(mMasterOutput ? mMasterBuffer->GetReadPosition(c) :
+                     reinterpret_cast<constSamplePtr>(mTemp[c].data()), floatSample,
          (mInterleaved
             ? mBuffer[0].ptr() + (c * SAMPLE_SIZE(mFormat))
             : mBuffer[c].ptr()
          ),
          mFormat, maxOut, ditherType,
          1, dstStride);
+
+   if (mMasterOutput) {
+      mMasterOutput->Release();
+      mMasterBuffer->Rewind();
+   }
 
    // MB: this doesn't take warping into account, replaced with code based on mSamplePos
    //mT += (maxOut / mRate);

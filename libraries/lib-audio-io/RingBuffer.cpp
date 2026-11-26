@@ -122,8 +122,11 @@ size_t RingBuffer::Unput(size_t size)
    // un-put some of the un-flushed data which is from mEnd to mWritten
    // bound the result
    auto end = mEnd.load(std::memory_order_relaxed);
-   size = std::min(size, Filled(end, mWritten));
+   const auto unflushed = Filled(end, mWritten);
+   size = std::min(size, unflushed);
    const auto result = size;
+   if (!result)
+      return 0;
 
    // First memmove
    auto limit = end < mWritten ? mWritten : mBufferSize;
@@ -156,7 +159,7 @@ size_t RingBuffer::Unput(size_t size)
    mWritten = (mWritten + (mBufferSize - result)) % mBufferSize;
 
    // Adjust mLastPadding
-   mLastPadding = std::min(mLastPadding, Filled(end, mWritten));
+   mLastPadding = std::min(mLastPadding, unflushed - result);
 
    return result;
 }
@@ -184,13 +187,13 @@ size_t RingBuffer::Clear(sampleFormat format, size_t samplesToClear)
    return cleared;
 }
 
-std::pair<samplePtr, size_t> RingBuffer::GetUnflushed(unsigned iBlock)
+std::pair<samplePtr, size_t> RingBuffer::GetUnflushed(unsigned iBlock, bool includePadding)
 {
    // This function is called by the writer
 
    // Find total number of samples unflushed:
    auto end = mEnd.load(std::memory_order_relaxed);
-   const size_t size = Filled(end, mWritten) - mLastPadding;
+   const size_t size = Filled(end, mWritten) - (includePadding ? 0 : mLastPadding);
 
    // How many in the first part:
    const size_t size0 = std::min(size, mBufferSize - end);

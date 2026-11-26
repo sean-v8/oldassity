@@ -392,6 +392,8 @@ list( APPEND SOURCES
       effects/Generator.h
       effects/Invert.cpp
       effects/Invert.h
+      effects/LegacyLimiter.cpp
+      effects/LegacyLimiterDSP.h
       effects/Loudness.cpp
       effects/Loudness.h
       effects/Noise.cpp

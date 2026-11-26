@@ -74,15 +74,17 @@ public:
     */
    std::shared_ptr<EffectInstance>
    AddGroup(
-      const ChannelGroup &group, unsigned chans, float sampleRate);
+      const ChannelGroup *group, unsigned chans, float sampleRate);
    //! Worker thread begins a batch of samples
    /*! @param running means no pause or deactivation of containing list */
+   size_t GetRealtimeLookahead(double rate) const;
+   void ResetRealtimeLookahead();
    bool ProcessStart(bool running);
    //! Worker thread processes part of a batch of samples
    /*!
     @return how many leading samples are discardable for latency
     */
-   size_t Process(const ChannelGroup &group,
+   size_t Process(const ChannelGroup *group,
       unsigned chans, // How many channels the playback device needs
       const float *const *inbuf, //!< chans input buffers
       float *const *outbuf, //!< chans output buffers
@@ -181,8 +183,6 @@ private:
    std::unique_ptr<EffectInstance::Message> mMovedMessage;
    std::unique_ptr<EffectOutputs> mOutputs;
 
-   //! How many samples must be discarded
-   std::optional<EffectInstance::SampleCount> mLatency;
    //! Assigned in the worker thread at the start of each processing scope
    bool mLastActive{};
 
@@ -192,8 +192,13 @@ private:
     @{
     */
     
-   std::unordered_map<const ChannelGroup *, std::pair<size_t, double>>
-      mGroups;
+   struct ProcessorGroup {
+      size_t first;
+      double rate;
+      //! The number of leading samples still to be discarded for this group.
+      std::optional<EffectInstance::SampleCount> latency;
+   };
+   std::unordered_map<const ChannelGroup *, ProcessorGroup> mGroups;
 
    // This must not be reset to nullptr while a worker thread is running.
    // In fact it is never yet reset to nullptr, before destruction.

@@ -12,6 +12,7 @@
 
 #include <wx/app.h>
 #include <wx/button.h>
+#include <wx/choice.h>
 #include <wx/dialog.h>
 #include <wx/listbox.h>
 #include <wx/sizer.h>
@@ -501,9 +502,9 @@ namespace
          auto effectName = GetEffectName();
          //After AudioIO::RemoveState call this will be destroyed
          auto project = mProject.get();
-         auto trackName = mTrack->GetName();
+         auto trackName = mTrack ? mTrack->GetName() : _("Master");
 
-         AudioIO::Get()->RemoveState(*project, &*mTrack, mEffectState);
+         AudioIO::Get()->RemoveState(*project, mTrack.get(), mEffectState);
          ProjectHistory::Get(*project).PushState(
             /*! i18n-hint: undo history record
              first parameter - realtime effect name
@@ -532,13 +533,16 @@ namespace
 
          auto& effectStateUI = RealtimeEffectStateUI::Get(*mEffectState);
 
-         effectStateUI.UpdateTrackData(*mTrack);
+         if (mTrack)
+            effectStateUI.UpdateTrackData(*mTrack);
+         else
+            effectStateUI.UpdateMasterData();
          effectStateUI.Toggle( *mProject );
       }
 
       void OnChangeButtonClicked(wxCommandEvent& event)
       {
-         if(!mTrack || mProject == nullptr)
+         if(mProject == nullptr)
             return;
          if(mEffectState == nullptr)
             return;//not initialized
@@ -554,15 +558,14 @@ namespace
          }
          
          auto &em = RealtimeEffectManager::Get(*mProject);
-         auto oIndex = em.FindState(&*mTrack, mEffectState);
+         auto oIndex = em.FindState(mTrack.get(), mEffectState);
          if (!oIndex)
             return;
 
          auto oldName = GetEffectName();
          auto &project = *mProject;
-         auto trackName = mTrack->GetName();
          if (auto state = AudioIO::Get()
-            ->ReplaceState(project, &*mTrack, *oIndex, *effectID)
+            ->ReplaceState(project, mTrack.get(), *oIndex, *effectID)
          ){
             // Message subscription took care of updating the button text
             // and destroyed `this`!
@@ -620,6 +623,7 @@ class RealtimeEffectListWindow
 {
    wxWeakRef<AudacityProject> mProject;
    std::shared_ptr<SampleTrack> mTrack;
+   RealtimeEffectList *mStack{};
    AButton* mAddEffect{nullptr};
    AButton* mAddFavorite{nullptr};
    wxStaticText* mAddEffectHint{nullptr};
@@ -750,7 +754,7 @@ public:
          if(mProject == nullptr)
             return;
 
-         auto& effectList = RealtimeEffectList::Get(*mTrack);
+         auto& effectList = *mStack;
          const auto from = event.GetSourceIndex();
          const auto to = event.GetTargetIndex();
          if(from != to)
@@ -771,7 +775,7 @@ public:
                    second parameter - track name
                    */
                   : XO("Moved %s down in %s"))
-                  .Format(effectName, mTrack->GetName()),
+                  .Format(effectName, mTrack ? mTrack->GetName() : _("Master")),
                XO("Change effect order"), UndoPush::CONSOLIDATE);
          }
          else
@@ -914,9 +918,13 @@ public:
 
    void OnEffectListItemChange(const RealtimeEffectListMessage& msg)
    {
+      if (msg.type == RealtimeEffectListMessage::Type::Reset) {
+         ReloadEffectsList();
+         return;
+      }
       auto sizer = mEffectListContainer->GetSizer();
       const auto insertItem = [this, &msg](){
-         auto& effects = RealtimeEffectList::Get(*mTrack);
+         auto& effects = *mStack;
          InsertEffectRow(msg.srcIndex, effects.GetStateAt(msg.srcIndex));
          mAddEffectHint->Hide();
          mAddEffectTutorialLink->Hide();
@@ -985,39 +993,39 @@ public:
 
    void ResetTrack()
    {
-      mEffectListItemMovedSubscription.Reset();
-
-      mTrack.reset();
-      mProject = nullptr;
-      ReloadEffectsList();
+      SetStack(nullptr, {}, nullptr);
    }
 
-   void SetTrack(AudacityProject& project,
-      const std::shared_ptr<SampleTrack>& track)
+   void SetTrack(AudacityProject &project, const std::shared_ptr<SampleTrack> &track)
    {
-      if (mTrack == track)
+      SetStack(&project, track, &RealtimeEffectList::Get(*track));
+      UpdateRealtimeEffectUIData(*track);
+   }
+
+   void SetMaster(AudacityProject &project)
+   {
+      SetStack(&project, {}, &RealtimeEffectList::Get(project));
+   }
+
+   void SetStack(AudacityProject *project, const std::shared_ptr<SampleTrack> &track,
+      RealtimeEffectList *stack)
+   {
+      if (mStack == stack && mTrack == track)
          return;
-
       mEffectListItemMovedSubscription.Reset();
-
       mTrack = track;
-      mProject = &project;
-      ReloadEffectsList();
-
-      if (track)
-      {
-         auto& effects = RealtimeEffectList::Get(*mTrack);
-         mEffectListItemMovedSubscription = effects.Subscribe(
+      mProject = project;
+      mStack = stack;
+      if (stack)
+         mEffectListItemMovedSubscription = stack->Subscribe(
             *this, &RealtimeEffectListWindow::OnEffectListItemChange);
-
-         UpdateRealtimeEffectUIData(*track);
-      }
+      ReloadEffectsList();
    }
 
    void EnableEffects(bool enable)
    {
-      if (mTrack)
-         RealtimeEffectList::Get(*mTrack).SetActive(enable);
+      if (mStack)
+         mStack->SetActive(enable);
    }
 
    void ReloadEffectsList()
@@ -1030,19 +1038,19 @@ public:
       mEffectListContainer->GetSizer()->Clear(true);
 
       
-      if(!mTrack || RealtimeEffectList::Get(*mTrack).GetStatesCount() == 0)
+      if(!mStack || mStack->GetStatesCount() == 0)
          mEffectListContainer->Hide();
       
       auto isEmpty{true};
-      if(mTrack)
+      if(mStack)
       {
-         auto& effects = RealtimeEffectList::Get(*mTrack);
+         auto& effects = *mStack;
          isEmpty = effects.GetStatesCount() == 0;
          for(size_t i = 0, count = effects.GetStatesCount(); i < count; ++i)
             InsertEffectRow(i, effects.GetStateAt(i));
       }
-      mAddEffect->SetEnabled(!!mTrack);
-      mAddFavorite->SetEnabled(!!mTrack);
+      mAddEffect->SetEnabled(mStack != nullptr);
+      mAddFavorite->SetEnabled(mStack != nullptr);
       //Workaround for GTK: Underlying GTK widget does not update
       //its size when wxWindow size is set to zero
       mEffectListContainer->Show(!isEmpty);
@@ -1054,7 +1062,7 @@ public:
 
    void OnAddEffectClicked(wxWindow &button, bool favorite)
    {
-      if(!mTrack || mProject == nullptr)
+      if(!mStack || mProject == nullptr)
          return;
 
       std::optional<wxString> effectID;
@@ -1083,7 +1091,7 @@ public:
          return;
       }
 
-      if(auto state = AudioIO::Get()->AddState(*mProject, &*mTrack, *effectID))
+      if(auto state = AudioIO::Get()->AddState(*mProject, mTrack.get(), *effectID))
       {
          auto effect = state->GetEffect();
          assert(effect); // postcondition of AddState
@@ -1093,7 +1101,7 @@ public:
              first parameter - realtime effect name
              second parameter - track name
              */
-            XO("Added %s to %s").Format(effectName, mTrack->GetName()),
+            XO("Added %s to %s").Format(effectName, mTrack ? mTrack->GetName() : _("Master")),
             //i18n-hint: undo history record
             XO("Add %s").Format(effectName));
       }
@@ -1225,6 +1233,24 @@ RealtimeEffectPanel::RealtimeEffectPanel(
       header->SetSizer(hSizer.release());
    }
    vSizer->Add(header, 0, wxEXPAND);
+   wxArrayString stacks;
+   stacks.Add(_("Track Effects"));
+   stacks.Add(_("Master Effects"));
+   mStackChoice = safenew ThemedWindowWrapper<wxChoice>(this, wxID_ANY,
+      wxDefaultPosition, wxDefaultSize, stacks);
+   mStackChoice->SetName(_("Effects stack"));
+   mStackChoice->SetSelection(0);
+   mStackChoice->Bind(wxEVT_CHOICE, [this](wxCommandEvent &event) {
+      if (event.GetSelection() == 1)
+         ShowMaster(false);
+      else {
+         mShowingMaster = false;
+         auto *track = dynamic_cast<SampleTrack *>(TrackFocus::Get(mProject).Get());
+         ShowPanel(track, false);
+      }
+   });
+   vSizer->Add(mStackChoice, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, 10);
+
 
    auto effectList = safenew ThemedWindowWrapper<RealtimeEffectListWindow>(this, wxID_ANY);
    effectList->SetBackgroundColorIndex(clrMedium);
@@ -1283,6 +1309,10 @@ RealtimeEffectPanel::RealtimeEffectPanel(
             message.type == UndoRedoMessage::Type::UndoOrRedo ||
             message.type == UndoRedoMessage::Type::Reset)
          {
+            if (mShowingMaster) {
+               auto &list = RealtimeEffectList::Get(mProject);
+               list.IsActive() ? mToggleEffects->PushDown() : mToggleEffects->PopUp();
+            }
             for (auto waveTrack : waveTracks)
                UpdateRealtimeEffectUIData(*waveTrack);
          }
@@ -1341,7 +1371,7 @@ RealtimeEffectPanel::RealtimeEffectPanel(
 
    mFocusChangeSubscription = TrackFocus::Get(project)
       .Subscribe([this](const TrackFocusChangeMessage& msg) {
-         if (IsShown())
+         if (IsShown() && !mShowingMaster)
          {
             auto& trackFocus = TrackFocus::Get(mProject);
             ShowPanel(dynamic_cast<SampleTrack *>(trackFocus.Get()), false);
@@ -1358,16 +1388,35 @@ RealtimeEffectPanel::~RealtimeEffectPanel()
 
 void RealtimeEffectPanel::ShowPanel(SampleTrack* track, bool focus)
 {
-   if(track == nullptr)
-   {
-      ResetTrack();
+   if (mShowingMaster && !focus)
       return;
-   }
 
+   mShowingMaster = false;
+   mStackChoice->SetSelection(0);
    wxWindowUpdateLocker freeze(this);
+   if (track)
+      SetTrack(track->SharedPointer<SampleTrack>());
+   else
+      ResetTrack();
+   ShowPanelWindow(focus);
+}
 
-   SetTrack(track->SharedPointer<SampleTrack>());
+void RealtimeEffectPanel::ShowMaster(bool focus)
+{
+   wxWindowUpdateLocker freeze(this);
+   mShowingMaster = true;
+   mStackChoice->SetSelection(1);
+   mEffectList->SetMaster(mProject);
+   auto &list = RealtimeEffectList::Get(mProject);
+   mTrackTitle->SetLabel(_("Master"));
+   mHeader->SetName(_("Master Effects"));
+   mToggleEffects->Enable();
+   list.IsActive() ? mToggleEffects->PushDown() : mToggleEffects->PopUp();
+   ShowPanelWindow(focus);
+}
 
+void RealtimeEffectPanel::ShowPanelWindow(bool focus)
+{
    auto &projectWindow = ProjectWindow::Get(mProject);
    const auto pContainerWindow = projectWindow.GetContainerWindow();
    if (pContainerWindow->GetWindow1() != this)
@@ -1402,6 +1451,9 @@ void RealtimeEffectPanel::HidePanel()
 
 void RealtimeEffectPanel::SetTrack(const std::shared_ptr<SampleTrack>& track)
 {
+   if (mShowingMaster)
+      return;
+
    //Avoid creation-on-demand of a useless, empty list in case the track is of non-wave type.
    if(track && dynamic_cast<WaveTrack*>(&*track) != nullptr)
    {
@@ -1422,6 +1474,8 @@ void RealtimeEffectPanel::SetTrack(const std::shared_ptr<SampleTrack>& track)
 
 void RealtimeEffectPanel::ResetTrack()
 {
+   mShowingMaster = false;
+   mStackChoice->SetSelection(0);
    mTrackTitle->SetLabel(wxEmptyString);
    mToggleEffects->Disable();
    mEffectList->ResetTrack();

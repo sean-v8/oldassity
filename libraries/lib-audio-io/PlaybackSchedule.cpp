@@ -90,7 +90,7 @@ PlaybackSlice
 PlaybackPolicy::GetPlaybackSlice(PlaybackSchedule &schedule, size_t available)
 {
    // How many samples to produce for each channel.
-   const auto realTimeRemaining = schedule.RealTimeRemaining();
+   const auto realTimeRemaining = std::max(0.0, schedule.RealTimeRemaining());
    auto frames = available;
    auto toProduce = frames;
    double deltat = frames / mRate;
@@ -99,7 +99,7 @@ PlaybackPolicy::GetPlaybackSlice(PlaybackSchedule &schedule, size_t available)
    {
       // Produce some extra silence so that the time queue consumer can
       // satisfy its end condition
-      const double extraRealTime = (TimeQueueGrainSize + 1) / mRate;
+      const double extraRealTime = (TimeQueueGrainSize + 1 + schedule.mRealtimeLookahead) / mRate;
       auto extra = std::min( extraRealTime, deltat - realTimeRemaining );
       auto realTime = realTimeRemaining + extra;
       frames = realTime * mRate + 0.5;

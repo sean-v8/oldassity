@@ -13,6 +13,7 @@
 #define __AUDACITY_MIX__
 
 #include "AudioGraphBuffers.h"
+#include "AudioGraphSource.h"
 #include "MixerOptions.h"
 #include "SampleFormat.h"
 
@@ -24,7 +25,7 @@ class MixerSource;
 class TrackList;
 class WideSampleSequence;
 
-class MIXER_API Mixer {
+class MIXER_API Mixer : private AudioGraph::Source {
  public:
    using WarpOptions = MixerOptions::Warp;
    using MixerSpec = MixerOptions::Downmix;
@@ -62,7 +63,8 @@ class MIXER_API Mixer {
          bool highQuality = true,
          //! Null or else must have a lifetime enclosing this object's
          MixerSpec *mixerSpec = nullptr,
-         bool applytTrackGains = true);
+         bool applytTrackGains = true,
+         Stages masterEffects = {});
 
    Mixer(const Mixer&) = delete;
    Mixer &operator=(const Mixer&) = delete;
@@ -117,12 +119,21 @@ class MIXER_API Mixer {
 
  private:
 
+   std::optional<size_t> MixInputs(size_t maxToProcess);
+   bool AcceptsBuffers(const Buffers &buffers) const override;
+   bool AcceptsBlockSize(size_t blockSize) const override;
+   std::optional<size_t> Acquire(Buffers &data, size_t bound) override;
+   sampleCount Remaining() const override;
+   bool Release() override;
+
    // Input
    const unsigned   mNumChannels;
    Inputs           mInputs;
 
    // Transformations
    const size_t     mBufferSize;
+   std::optional<Buffers> mMasterBuffer;
+   AudioGraph::Source *mMasterOutput{};
 
    std::pair<bool, sampleFormat>
    NeedsDither(bool needsDither, double rate) const;

@@ -98,7 +98,7 @@ DefaultPlaybackPolicy::GetPlaybackSlice(
          // Produce some extra silence so that the time queue consumer can
          // satisfy its end condition
          const double extraRealTime =
-            ((TimeQueueGrainSize + 1) / mRate) * mLastPlaySpeed;
+            ((TimeQueueGrainSize + 1 + schedule.mRealtimeLookahead) / mRate) * mLastPlaySpeed;
          extra = std::min( extraRealTime, deltat - realTimeRemaining );
          frames = ((realTimeRemaining + extra) * mRate) / mLastPlaySpeed;
       }

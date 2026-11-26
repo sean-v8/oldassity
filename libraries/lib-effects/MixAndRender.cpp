@@ -199,10 +199,10 @@ TrackListHolder MixAndRender(const TrackIterRange<const WaveTrack> &trackRange,
 #include "RealtimeEffectList.h"
 #include "RealtimeEffectState.h"
 
-std::vector<MixerOptions::StageSpecification>
-GetEffectStages(const WaveTrack &track)
+template<typename Host>
+std::vector<MixerOptions::StageSpecification> GetEffectStagesFor(const Host &host)
 {
-   auto &effects = RealtimeEffectList::Get(track);
+   auto &effects = RealtimeEffectList::Get(host);
    if (!effects.IsActive())
       return {};
    std::vector<MixerOptions::StageSpecification> result;
@@ -221,6 +221,16 @@ GetEffectStages(const WaveTrack &track)
          settings });
    }
    return result;
+}
+
+std::vector<MixerOptions::StageSpecification> GetEffectStages(const WaveTrack &track)
+{
+   return GetEffectStagesFor(track);
+}
+
+std::vector<MixerOptions::StageSpecification> GetMasterEffectStages(const AudacityProject &project)
+{
+   return GetEffectStagesFor(project);
 }
 
 /* The following registration objects need a home at a higher level to avoid

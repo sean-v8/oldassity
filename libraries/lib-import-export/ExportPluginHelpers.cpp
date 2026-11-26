@@ -33,6 +33,8 @@ std::unique_ptr<Mixer> ExportPluginHelpers::CreateMixer(const TrackList &tracks,
       inputs.emplace_back(
          StretchingSequence::Create(*pTrack, pTrack->GetClipInterfaces()),
          GetEffectStages(*pTrack));
+   auto master = !mixerSpec && numOutChannels <= 2 && tracks.GetOwner()
+      ? GetMasterEffectStages(*tracks.GetOwner()) : Mixer::Stages{};
    // MB: the stop time should not be warped, this was a bug.
    return std::make_unique<Mixer>(move(inputs),
                   // Throw, to stop exporting, if read fails:
@@ -41,7 +43,7 @@ std::unique_ptr<Mixer> ExportPluginHelpers::CreateMixer(const TrackList &tracks,
                   startTime, stopTime,
                   numOutChannels, outBufferSize, outInterleaved,
                   outRate, outFormat,
-                  true, mixerSpec);
+                  true, mixerSpec, true, std::move(master));
 }
 
 namespace

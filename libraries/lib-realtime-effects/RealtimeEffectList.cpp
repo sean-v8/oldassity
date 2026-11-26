@@ -20,7 +20,7 @@ RealtimeEffectList::~RealtimeEffectList()
 {
 }
 
-// Deep copy of states
+// Snapshot the list and preserve the identities of individual effects.
 std::unique_ptr<ClientData::Cloneable<>> RealtimeEffectList::Clone() const
 {
    auto result = std::make_unique<RealtimeEffectList>();
@@ -42,14 +42,6 @@ static const AttachedProjectObjects::RegisteredFactory masterEffects
 RealtimeEffectList &RealtimeEffectList::Get(AudacityProject &project)
 {
    return project.AttachedObjects::Get<RealtimeEffectList>(masterEffects);
-}
-
-RealtimeEffectList &RealtimeEffectList::Set(
-   AudacityProject &project, const std::shared_ptr<RealtimeEffectList> &list)
-{
-   auto &result = *list;
-   project.AttachedObjects::Assign(masterEffects, list);
-   return result;
 }
 
 const RealtimeEffectList &
@@ -276,10 +268,16 @@ void RealtimeEffectList::WriteXML(XMLWriter &xmlFile) const
    xmlFile.EndTag(XMLTag());
 }
 
-void RealtimeEffectList::RestoreUndoRedoState(AudacityProject &project) noexcept
+void RealtimeEffectList::RestoreUndoRedoState(AudacityProject &project)
 {
-   // Restore per-project states
-   Set(project, shared_from_this());
+   auto &current = Get(project);
+   auto restored = mStates;
+   {
+      LockGuard lock{current.mLock};
+      current.mStates.swap(restored);
+      current.mActive.store(IsActive(), std::memory_order_relaxed);
+   }
+   current.Publish({RealtimeEffectListMessage::Type::Reset, 0, 0, {}});
 }
 
 bool RealtimeEffectList::IsActive() const
@@ -294,6 +292,8 @@ void RealtimeEffectList::SetActive(bool value)
 
 static UndoRedoExtensionRegistry::Entry sEntry {
    [](AudacityProject &project) -> std::shared_ptr<UndoStateExtension> {
-      return RealtimeEffectList::Get(project).shared_from_this();
+      auto snapshot = RealtimeEffectList::Get(project).Clone();
+      return std::shared_ptr<RealtimeEffectList>(
+         static_cast<RealtimeEffectList *>(snapshot.release()));
    }
 };

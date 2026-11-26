@@ -48,6 +48,7 @@ public:
    static void FlushPendingSettingsHistory(AudacityProject &project);
 
    void UpdateTrackData(const Track& track);
+   void UpdateMasterData();
 
    static RealtimeEffectStateUI &Get(RealtimeEffectState &state);
    static const RealtimeEffectStateUI &Get(const RealtimeEffectState &state);

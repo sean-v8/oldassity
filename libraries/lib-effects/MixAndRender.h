@@ -92,4 +92,7 @@ EFFECTS_API
 std::vector<MixerOptions::StageSpecification>
 GetEffectStages(const WaveTrack &track);
 
+EFFECTS_API std::vector<MixerOptions::StageSpecification>
+GetMasterEffectStages(const AudacityProject &project);
+
 #endif
