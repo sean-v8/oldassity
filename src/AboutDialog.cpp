@@ -44,6 +44,7 @@ hold information about one contributor to Audacity.
 
 #include "AllThemeResources.h"
 #include "Theme.h"
+#include "../images/AudacityLogoWithName.xpm"
 
 
 // Notice this is a "system include".  This is on purpose and only until
@@ -447,7 +448,7 @@ void AboutDialog::PopulateAudacityPage( ShuttleGui & S )
    S.StartNotebookPage( Verbatim("Oldassity") );
    S.StartVerticalLay(1);
    icon = safenew wxStaticBitmap(S.GetParent(), wxID_ANY,
-      theTheme.Bitmap(bmpAudacityLogo48x48));
+      wxBitmap(AudacityLogoWithName_xpm));
    S.Prop(0).AddWindow( icon );
 
    HtmlWindow *html = safenew LinkingHtmlWindow(S.GetParent(), -1,
