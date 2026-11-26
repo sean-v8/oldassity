@@ -93,8 +93,9 @@ public:
 
    const EffectSettings &GetSettings() const { return mMainSettings.settings; }
 
-   //! Restore a project history snapshot on the main thread with audio stopped.
+   //! Restore settings on the main thread; queue changes for an active worker.
    void RestoreSettings(EffectSettings settings);
+   void CommitPendingSettings();
 
    //! Test only in the main thread
    bool IsEnabled() const noexcept;

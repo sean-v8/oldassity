@@ -169,6 +169,20 @@ unsigned int UndoManager::GetCurrentState()
    return current;
 }
 
+void UndoManager::SetRealtimeSettingsAction(std::function<void(bool)> action)
+{
+   assert(current >= 0 && static_cast<size_t>(current) < stack.size());
+   stack[current]->realtimeSettingsAction = std::move(action);
+}
+
+std::function<void(bool)> UndoManager::GetRealtimeSettingsAction(bool redo) const
+{
+   const auto index = current + (redo ? 1 : 0);
+   if (index <= 0 || static_cast<size_t>(index) >= stack.size())
+      return {};
+   return stack[index]->realtimeSettingsAction;
+}
+
 bool UndoManager::UndoAvailable()
 {
    return CheckAvailable(current - 1);

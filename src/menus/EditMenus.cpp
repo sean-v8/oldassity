@@ -1,5 +1,6 @@
 
 #include "../AdornedRulerPanel.h"
+#include "AudioIO.h"
 #include "../Clipboard.h"
 #include "../CommonCommandFlags.h"
 #include "../LabelTrack.h"
@@ -175,6 +176,23 @@ bool HasHiddenData(const TrackList& trackList)
 
 // Menu handler functions
 
+// A settings transition can use the existing realtime settings exchange.
+// The ordinary history restore replaces the track list and requires a stop.
+void RestoreRealtimeSettingsHistory(AudacityProject &project, bool redo)
+{
+   auto &manager = UndoManager::Get(project);
+   auto action = manager.GetRealtimeSettingsAction(redo);
+   if (!action || (redo ? !manager.RedoAvailable() : !manager.UndoAvailable()))
+      return;
+
+   const auto restore = [&](const UndoStackElem &) { action(redo); };
+   if (redo)
+      manager.Redo(restore);
+   else
+      manager.Undo(restore);
+   ProjectHistory::AutoSave::Call(project);
+}
+
 void OnUndo(const CommandContext &context)
 {
    auto &project = context.project;
@@ -188,7 +206,13 @@ void OnUndo(const CommandContext &context)
       return;
    }
 
+   if (auto *audio = AudioIO::Get(); audio->IsBusy() && audio->GetNumCaptureChannels() > 0)
+      return;
    RealtimeEffectStateUI::FlushPendingSettingsHistory(project);
+   if (AudioIOBusyPred(project)) {
+      RestoreRealtimeSettingsHistory(project, false);
+      return;
+   }
 
    if (!ProjectHistory::Get( project ).UndoAvailable()) {
       AudacityMessageBox( XO("Nothing to undo") );
@@ -221,7 +245,13 @@ void OnRedo(const CommandContext &context)
       return;
    }
 
+   if (auto *audio = AudioIO::Get(); audio->IsBusy() && audio->GetNumCaptureChannels() > 0)
+      return;
    RealtimeEffectStateUI::FlushPendingSettingsHistory(project);
+   if (AudioIOBusyPred(project)) {
+      RestoreRealtimeSettingsHistory(project, true);
+      return;
+   }
 
    if (!ProjectHistory::Get( project ).RedoAvailable()) {
       AudacityMessageBox( XO("Nothing to redo") );
@@ -1100,10 +1130,10 @@ BaseItemSharedPtr EditMenu()
    Menu( wxT("Edit"), XXO("&Edit"),
       Section( "UndoRedo",
          Command( wxT("Undo"), XXO("&Undo"), OnUndo,
-            AudioIONotBusyFlag() | UndoAvailableFlag(), wxT("Ctrl+Z") ),
+            UndoAvailableFlag(), wxT("Ctrl+Z") ),
 
          Command( wxT("Redo"), XXO("&Redo"), OnRedo,
-            AudioIONotBusyFlag() | RedoAvailableFlag(), redoKey ),
+            RedoAvailableFlag(), redoKey ),
 
          Special( wxT("UndoItemsUpdateStep"),
          [](AudacityProject &project, wxMenu&) {

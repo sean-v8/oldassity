@@ -128,6 +128,8 @@ struct UndoStackElem {
    UndoState state;
    TranslatableString description;
    TranslatableString shortDescription;
+   // Optional settings-only transition from the preceding project state.
+   std::function<void(bool redo)> realtimeSettingsAction;
 };
 
 using UndoStack = std::vector <std::unique_ptr<UndoStackElem>>;
@@ -179,6 +181,8 @@ class PROJECT_HISTORY_API UndoManager final
    );
    unsigned int GetNumStates();
    unsigned int GetCurrentState();
+   void SetRealtimeSettingsAction(std::function<void(bool)> action);
+   std::function<void(bool)> GetRealtimeSettingsAction(bool redo) const;
 
    void StopConsolidating() { mayConsolidate = false; }
 

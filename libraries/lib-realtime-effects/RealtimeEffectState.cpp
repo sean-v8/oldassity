@@ -630,12 +630,11 @@ bool RealtimeEffectState::ProcessEnd()
 
 void RealtimeEffectState::RestoreSettings(EffectSettings settings)
 {
-   assert(!mInitialized);
    const auto wasEnabled = IsEnabled();
    if (GetAccessState()) {
       Access access{ *this };
       access.Set(std::move(settings), nullptr);
-      access.Flush();
+      CommitPendingSettings();
    }
    else
       mMainSettings.settings = std::move(settings);
@@ -644,6 +643,14 @@ void RealtimeEffectState::RestoreSettings(EffectSettings settings)
       Publish(IsEnabled()
          ? RealtimeEffectStateChange::EffectOn
          : RealtimeEffectStateChange::EffectOff);
+}
+
+// LV2 control values are supplied by the UI. Paused playback need not
+// acknowledge the write before those values can be snapshotted or displayed.
+void RealtimeEffectState::CommitPendingSettings()
+{
+   if (const auto *state = GetAccessState())
+      mMainSettings.Set(state->mLastSettings);
 }
 
 bool RealtimeEffectState::IsEnabled() const noexcept
@@ -681,7 +688,11 @@ bool RealtimeEffectState::Finalize() noexcept
 
    if (!pInstance->UsesMessages()) {
       // This is the main thread cleaning up a state not now used in processing
-      mMainSettings = mWorkerSettings;
+      if (const auto *state = GetAccessState();
+          state && state->mLastSettings.counter != mWorkerSettings.counter)
+         mMainSettings.Set(state->mLastSettings);
+      else
+         mMainSettings = mWorkerSettings;
    }
 
    auto result = pInstance->RealtimeFinalize(mMainSettings.settings);

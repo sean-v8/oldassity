@@ -166,6 +166,8 @@ void RealtimeEffectStateUI::Show(AudacityProject& project)
    mEffectUIHost->PushEventHandler(this);
    mpProject = &project;
    mInPlaceHistory = mEffectUIHost->GetEditor()->SupportsInPlaceSettingsHistory();
+   mCheckpoint = mInPlaceHistory
+      ? std::make_shared<const EffectSettings>(access->Get()) : nullptr;
 
    mProjectWindowDestroyedSubscription = projectWindow.Subscribe(
       [this, &project](ProjectWindowDestroyedMessage) {
@@ -295,6 +297,7 @@ void RealtimeEffectStateUI::RestoreSettings(const EffectSettings &settings)
    mRealtimeEffectState.RestoreSettings(settings);
    mEffectUIHost->TransferDataToWindow();
    mOpeningSettings = DescribeSettings(mRealtimeEffectState, settings);
+   mCheckpoint = std::make_shared<const EffectSettings>(settings);
    mParameterChanged = false;
 }
 
@@ -302,8 +305,13 @@ bool RealtimeEffectStateUI::CheckpointSettings(AudacityProject &project)
 {
    mSettingsTimer.Stop();
    auto access = mRealtimeEffectState.GetAccess();
-   access->Flush();
+   if (mInPlaceHistory)
+      mRealtimeEffectState.CommitPendingSettings();
+   else
+      access->Flush();
    const auto settings = DescribeSettings(mRealtimeEffectState, access->Get());
+   const auto checkpoint = mInPlaceHistory
+      ? std::make_shared<const EffectSettings>(access->Get()) : nullptr;
    const auto changed = mOpeningSettings && settings
       ? *mOpeningSettings != *settings : mParameterChanged;
 
@@ -313,7 +321,19 @@ bool RealtimeEffectStateUI::CheckpointSettings(AudacityProject &project)
          : XO("Changed settings for %s on %s").Format(mEffectName, mTrackName);
       ProjectHistory::Get(project).PushState(
          description, XO("Change Realtime Effect Settings"));
+      if (mCheckpoint && checkpoint) {
+         UndoManager::Get(project).SetRealtimeSettingsAction(
+            [weak = mRealtimeEffectState.weak_from_this(),
+             before = mCheckpoint, after = checkpoint](bool redo) {
+               if (auto state = weak.lock()) {
+                  auto settings = *(redo ? after : before);
+                  settings.extra.SetActive(state->IsEnabled());
+                  Get(*state).RestoreSettings(settings);
+               }
+            });
+      }
    }
+   mCheckpoint = checkpoint;
    mOpeningSettings = settings;
    mParameterChanged = false;
    return changed;
