@@ -1517,48 +1517,63 @@ void ProjectFileManager::Compact()
    auto &projectFileIO = ProjectFileIO::Get(project);
    bool isBatch = project.mBatchMode > 0;
 
-   // Purpose of this is to remove the -wal file.
-   projectFileIO.ReopenProject();
-
-   auto savedState = undoManager.GetSavedState();
-   const auto currentState = undoManager.GetCurrentState();
-   if (savedState < 0) {
-      undoManager.StateSaved();
-      savedState = undoManager.GetSavedState();
-      if (savedState < 0) {
-         wxASSERT(false);
-         savedState = 0;
-      }
+   // Checkpoint the WAL before measuring the original database.
+   if (!projectFileIO.ReopenProject())
+   {
+      AudacityMessageBox(XO("Could not reopen the project for compaction."));
+      return;
    }
-   const auto least = std::min<size_t>(savedState, currentState);
-   const auto greatest = std::max<size_t>(savedState, currentState);
-   std::vector<const TrackList*> trackLists;
-   auto fn = [&](const UndoStackElem& elem) {
-      if (auto pTracks = TrackList::FindUndoTracks(elem))
-         trackLists.push_back(pTracks);
+
+   const auto currentState = undoManager.GetCurrentState();
+   const auto savedState = undoManager.GetSavedState();
+   const auto savedIndex = savedState < 0 ? currentState :
+      static_cast<unsigned int>(savedState);
+   const auto least = std::min(savedIndex, currentState);
+   const auto greatest = std::max(savedIndex, currentState);
+
+   // The first list supplies the document written into the replacement file.
+   // Keep both the actual last saved audio and any edits currently on screen.
+   const auto &currentTracks = TrackList::Get(project);
+   std::vector<const TrackList*> trackLists {
+      mLastSavedTracks ? mLastSavedTracks.get() : &currentTracks,
+      &currentTracks
    };
-   undoManager.VisitStates(fn, least, 1 + least);
-   if (least != greatest)
-      undoManager.VisitStates(fn, greatest, 1 + greatest);
+   if (savedIndex != currentState)
+      undoManager.VisitStates([&](const UndoStackElem &state) {
+         if (auto *tracks = TrackList::FindUndoTracks(state))
+            trackLists.push_back(tracks);
+      }, savedIndex, savedIndex + 1);
 
-   int64_t total = projectFileIO.GetTotalUsage();
-   int64_t used = projectFileIO.GetCurrentUsage(trackLists);
-
-   auto before = wxFileName::GetSize(projectFileIO.GetFileName());
+   const auto used = projectFileIO.GetCurrentUsage(trackLists);
+   const auto before = wxFileName::GetSize(projectFileIO.GetFileName());
+   const auto reclaimable = std::max<wxLongLong_t>(0, before.GetValue() - used);
 
    CompactDialog dlg(
          XO("Compacting this project will free up disk space by removing unused bytes within the file.\n\n"
             "There is %s of free disk space and this project is currently using %s.\n"
             "\n"
-            "If you proceed, the current Undo/Redo History and clipboard contents will be discarded "
-            "and you will recover approximately %s of disk space.\n"
+            "Compaction needs room for a temporary copy of the audio being kept (about %s).\n"
+            "If compaction succeeds, it will discard Undo/Redo History and clipboard contents "
+            "and recover approximately %s of disk space.\n"
             "\n"
             "Do you want to continue?")
          .Format(Internat::FormatSize(projectFileIO.GetFreeDiskSpace()),
                   Internat::FormatSize(before.GetValue()),
-                  Internat::FormatSize(total - used)));
+                  Internat::FormatSize(used),
+                  Internat::FormatSize(reclaimable)));
    if (isBatch || dlg.ShowModal() == wxYES)
    {
+      projectFileIO.Compact(trackLists, true);
+      if (!projectFileIO.WasCompacted())
+      {
+         if (!isBatch)
+            AudacityMessageBox(XO(
+               "The project file was not reduced. Undo/Redo and the clipboard were kept.\n"
+               "Check that the project drive has room for the temporary copy."),
+               XO("Compact Project"));
+         return;
+      }
+
       // We can remove redo states, if they are after the saved state.
       undoManager.RemoveStates(1 + greatest, undoManager.GetNumStates());
 
@@ -1572,12 +1587,6 @@ void ProjectFileManager::Compact()
       // And clear the clipboard, if needed
       if (&mProject == clipboard.Project().lock().get())
          clipboard.Clear();
-
-      // Refresh the before space usage since it may have changed due to the
-      // above actions.
-      auto before = wxFileName::GetSize(projectFileIO.GetFileName());
-
-      projectFileIO.Compact(trackLists, true);
 
       auto after = wxFileName::GetSize(projectFileIO.GetFileName());
 

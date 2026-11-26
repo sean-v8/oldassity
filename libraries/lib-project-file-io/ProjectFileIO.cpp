@@ -1174,8 +1174,13 @@ bool ProjectFileIO::CopyTo(const FilePath &destpath,
          return false;
       }
 
-      // See BEGIN above...
-      sqlite3_exec(db, "COMMIT;", nullptr, nullptr, nullptr);
+      rc = sqlite3_exec(db, "COMMIT;", nullptr, nullptr, nullptr);
+      if (rc != SQLITE_OK)
+      {
+         ADD_EXCEPTION_CONTEXT("sqlite3.rc", std::to_string(rc));
+         SetDBError(XO("Unable to commit the destination project database"));
+         return false;
+      }
    }
 
    // Detach the destination database
@@ -1223,7 +1228,7 @@ bool ProjectFileIO::ShouldCompact(const std::vector<const TrackList *> &tracks)
       return 0;
    };
 
-   if (!Query("SELECT Count(*) FROM sampleblocks;", cb) || blockcount == 0)
+   if (!Query("SELECT Count(*) FROM sampleblocks;", cb))
    {
       // Shouldn't compact since we don't have the full picture
       return false;
@@ -1231,6 +1236,14 @@ bool ProjectFileIO::ShouldCompact(const std::vector<const TrackList *> &tracks)
 
    // Remember if we had unused blocks in the project file
    mHadUnused = (blockcount > active.size());
+
+   // Released sample blocks leave free pages in the file, even when all
+   // remaining sample rows belong to the tracks we intend to keep.
+   int64_t pages = 0, freePages = 0;
+   if (GetValue("PRAGMA main.page_count;", pages, true) && pages > 0 &&
+       GetValue("PRAGMA main.freelist_count;", freePages, true) &&
+       freePages > 0 && freePages >= (pages + 4) / 5)
+      return true;
 
    // Let's make a percentage...should be plenty of head room
    current *= 100;
@@ -1465,6 +1478,14 @@ void ProjectFileIO::Compact(
    wxString origName = mFileName;
    wxString backName = origName + "_compact_back";
    wxString tempName = origName + "_compact_temp";
+
+   // A previous interrupted compaction may have left a recoverable copy.
+   if (wxFileExists(backName) || wxFileExists(tempName))
+   {
+      wxLogWarning(wxT("Compaction skipped because a previous compact file exists for %s"),
+         origName);
+      return;
+   }
 
    // Copy the original database to a new database. Only prune sample blocks if
    // we have a tracklist.
