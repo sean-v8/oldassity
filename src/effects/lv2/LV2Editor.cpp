@@ -30,6 +30,7 @@
 #include "RealtimeEffectManager.h"
 
 #include <algorithm>
+#include <cstring>
 
 #include "ShuttleGui.h"
 
@@ -172,7 +173,20 @@ struct LV2Editor::IdleGraph {
    }
 
    LV2_URID meshType{};
+   bool IsPresetState(const void *buffer, uint32_t size) const
+   {
+      if (!presetStateType || size < sizeof(LV2_Atom_Object))
+         return false;
+      LV2_Atom_Object object;
+      std::memcpy(&object, buffer, sizeof(object));
+      return (object.atom.type == forge.Object || object.atom.type == forge.Blank)
+         && object.atom.size >= sizeof(object.body)
+         && object.atom.size <= size - sizeof(object.atom)
+         && object.body.otype == presetStateType;
+   }
+
    LV2_URID presetStateType{};
+   bool editorSentPresetState{};
    std::vector<LV2_URID> fftGraphs;
    LV2InstanceFeaturesList features;
    LV2PortStates states;
@@ -945,6 +959,9 @@ void LV2Editor::UpdateGraphicalUI()
                // The silent EQ supplies the curve; the live EQ owns FFT and preset state.
                if (idleGraph && idleGraph->SuppressIdleAtom(*atom))
                   return;
+               if (!idleGraph && mpIdleGraph && mpIdleGraph->editorSentPresetState &&
+                   mpIdleGraph->IsPresetState(atom, size))
+                  return;
                suil_instance_port_event(mUI.mSuilInstance.get(),
                   atomState->mpPort->mIndex, size,
                   LV2Symbols::urid_EventTransfer, atom);
@@ -1131,8 +1148,11 @@ void LV2Editor::suil_port_write(uint32_t port_index,
       auto &atomPortState = portUIStates.mControlIn;
       if (atomPortState && port_index == atomPortState->mpPort->mIndex) {
          atomPortState->ReceiveFromDialog(buffer, buffer_size);
-         if (mpIdleGraph)
+         if (mpIdleGraph) {
+            if (mpIdleGraph->IsPresetState(buffer, buffer_size))
+               mpIdleGraph->editorSentPresetState = true;
             mpIdleGraph->uiStates.mControlIn->ReceiveFromDialog(buffer, buffer_size);
+         }
       }
    }
 }
