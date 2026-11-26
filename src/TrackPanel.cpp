@@ -1649,10 +1649,11 @@ struct Subgroup final : TrackPanelGroup {
       constexpr wxCoord topResizeThickness = 4;
       static_assert(topResizeThickness < kTopMargin);
 
+      const auto *focused = TrackFocus::Get(*mPanel.GetProject()).Get();
       for (const auto leader : tracks) {
-         if (dynamic_cast<WaveTrack *>(leader)) {
-            // The top-inset part of the separator belongs to the track below.
-            // Its position stays put when that track changes height.
+         if (leader == focused && dynamic_cast<WaveTrack *>(leader)) {
+            // The focused track can also be resized from its top edge.
+            // Otherwise the full separator belongs to the track above.
             refinement.emplace_back(yy - topResizeThickness,
                std::make_shared<TrackPanelResizerCell>(**leader->Channels().rbegin(), true));
          }
