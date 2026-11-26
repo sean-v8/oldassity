@@ -369,19 +369,36 @@ namespace
          optionsButton->SetButtonType(AButton::TextButton);
          optionsButton->Bind(wxEVT_BUTTON, &RealtimeEffectControl::OnOptionsClicked, this);
 
-         //Remove/replace effect
+         // Replace or remove the effect.
          auto changeButton = safenew ThemedAButtonWrapper<AButton>(this);
          changeButton->SetImageIndices(0, bmpMoreNormal, bmpMoreHover, bmpMoreDown, bmpMoreHover, bmpMoreDisabled);
          changeButton->SetBackgroundColorIndex(clrEffectListItemBackground);
          changeButton->SetTranslatableLabel(XO("Replace effect"));
          changeButton->Bind(wxEVT_BUTTON, &RealtimeEffectControl::OnChangeButtonClicked, this);
          
+         auto removeButton = safenew ThemedAButtonWrapper<AButton>(this);
+         removeButton->SetImageIndices(0, bmpHButtonNormal, bmpHButtonHover,
+            bmpHButtonDown, bmpHButtonHover, bmpHButtonDisabled);
+         removeButton->SetButtonType(AButton::FrameButton);
+         removeButton->SetBackgroundColorIndex(clrEffectListItemBackground);
+         removeButton->SetForegroundColorIndex(clrTrackPanelText);
+         removeButton->SetTranslatableLabel(Verbatim(wxT("−")));
+         removeButton->SetName(_("Remove effect"));
+         removeButton->SetToolTip(XO("Remove effect"));
+         const auto buttonSize = theTheme.ImageSize(bmpMoreNormal);
+         removeButton->SetMinSize(buttonSize);
+         removeButton->SetMaxSize(buttonSize);
+         removeButton->Bind(wxEVT_BUTTON, [this](wxCommandEvent &) {
+            RemoveFromList();
+         });
+
          auto dragArea = safenew wxStaticBitmap(this, wxID_ANY, theTheme.Bitmap(bmpDragArea));
          dragArea->Disable();
          sizer->Add(dragArea, 0, wxLEFT | wxCENTER, 5);
          sizer->Add(enableButton, 0, wxLEFT | wxCENTER, 5);
          sizer->Add(optionsButton, 1, wxLEFT | wxCENTER, 5);
-         sizer->Add(changeButton, 0, wxLEFT | wxRIGHT | wxCENTER, 5);
+         sizer->Add(changeButton, 0, wxLEFT | wxCENTER, 5);
+         sizer->Add(removeButton, 0, wxLEFT | wxRIGHT | wxCENTER, 5);
          mChangeButton = changeButton;
          mOptionsButton = optionsButton;
 
@@ -506,12 +523,6 @@ namespace
          const auto effectID = mEffectPicker->PickEffect(mChangeButton, mEffectState->GetID());
          if(!effectID)
             return;//nothing
-         
-         if(effectID->empty())
-         {
-            RemoveFromList();
-            return;
-         }
          
          auto &em = RealtimeEffectManager::Get(*mProject);
          auto oIndex = em.FindState(mTrack.get(), mEffectState);
@@ -731,27 +742,22 @@ public:
    std::optional<wxString> PickEffect(wxWindow* parent, const wxString& selectedEffectID) override
    {
       wxMenu menu;
-      if(!selectedEffectID.empty())
-      {
-         //no need to handle language change since menu creates its own event loop
-         menu.Append(wxID_REMOVE, _("No Effect"));
-         menu.AppendSeparator();
-      }
-      
-      auto favorites = ReadFavorites();
-      const bool alreadyFavorite = favorites.Index(selectedEffectID) != wxNOT_FOUND;
-      auto favoriteMenu = std::make_unique<wxMenu>();
-      const auto shortcuts = AppendFavoriteItems(*favoriteMenu, favorites);
-
+      wxArrayString favorites;
+      FavoriteMenuItems shortcuts;
+      bool alreadyFavorite = false;
       int toggleFavorite = wxID_NONE;
       if (!selectedEffectID.empty()) {
+         favorites = ReadFavorites();
+         alreadyFavorite = favorites.Index(selectedEffectID) != wxNOT_FOUND;
+         auto favoriteMenu = std::make_unique<wxMenu>();
+         shortcuts = AppendFavoriteItems(*favoriteMenu, favorites);
          favoriteMenu->AppendSeparator();
          toggleFavorite = favoriteMenu->Append(wxID_ANY, alreadyFavorite
             ? _("Remove current effect from Favorites")
             : _("Add current effect to Favorites"))->GetId();
+         menu.AppendSubMenu(favoriteMenu.release(), _("Favorites"));
+         menu.AppendSeparator();
       }
-      menu.AppendSubMenu(favoriteMenu.release(), _("Favorites"));
-      menu.AppendSeparator();
 
       RealtimeEffectsMenuVisitor visitor { menu };
       
@@ -766,9 +772,7 @@ public:
       
       if(parent->PopupMenu(&menu, parent->GetClientRect().GetLeftBottom()) && commandId != wxID_NONE)
       {
-         if(commandId == wxID_REMOVE)
-            return wxString {};
-         else if(commandId == wxID_MORE)
+         if(commandId == wxID_MORE)
             OpenInDefaultBrowser("https://plugins.audacityteam.org/");
          else if (commandId == toggleFavorite) {
             if (alreadyFavorite)
