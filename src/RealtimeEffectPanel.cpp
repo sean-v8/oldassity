@@ -21,6 +21,7 @@
 #include <wx/stattext.h>
 #include <wx/menu.h>
 #include <wx/tokenzr.h>
+#include <wx/textdlg.h>
 
 #include <algorithm>
 #include <wx/wupdlock.h>
@@ -39,12 +40,16 @@
 #include "ProjectWindow.h"
 #include "ProjectWindows.h"
 #include "TrackPanelAx.h"
+#include "TrackPanel.h"
 #include "AColor.h"
 #include "WaveTrack.h"
 #include "effects/EffectUI.h"
 #include "effects/EffectManager.h"
 #include "RealtimeEffectList.h"
 #include "RealtimeEffectState.h"
+#include "XMLFileReader.h"
+#include "XMLWriter.h"
+#include "ProjectAudioIO.h"
 #include "effects/RealtimeEffectStateUI.h"
 #include "UndoManager.h"
 #include "Prefs.h"
@@ -74,6 +79,159 @@ namespace
    {
       gPrefs->Write(favoritesKey, wxJoin(favorites, '\n', '\0'));
       gPrefs->Flush();
+   }
+
+   struct ChainPreset
+   {
+      wxString name;
+      wxString xml;
+   };
+
+   wxString PresetGroup(bool master)
+   {
+      return master ? wxT("/GUI/RealtimeMasterPresets/") :
+         wxT("/GUI/RealtimeTrackPresets/");
+   }
+
+   std::vector<ChainPreset> ReadChainPresets(bool master)
+   {
+      const auto group = PresetGroup(master);
+      std::vector<ChainPreset> presets;
+      const auto count = gPrefs->Read(group + "Count", 0L);
+      for (long index = 0; index < count; ++index) {
+         const auto key = group + wxString::Format(wxT("%ld/"), index);
+         auto name = gPrefs->Read(key + "Name", wxString{});
+         auto xml = gPrefs->Read(key + "Chain", wxString{});
+         if (!name.empty() && !xml.empty())
+            presets.push_back({std::move(name), std::move(xml)});
+      }
+      return presets;
+   }
+
+   void WriteChainPresets(bool master, const std::vector<ChainPreset> &presets)
+   {
+      const auto group = PresetGroup(master);
+      const auto oldCount = gPrefs->Read(group + "Count", 0L);
+      const auto count = static_cast<long>(presets.size());
+      for (long index = 0; index < count; ++index) {
+         const auto key = group + wxString::Format(wxT("%ld/"), index);
+         gPrefs->Write(key + "Name", presets[index].name);
+         gPrefs->Write(key + "Chain", presets[index].xml);
+      }
+      for (long index = count; index < oldCount; ++index)
+         gPrefs->DeleteGroup(group + wxString::Format(wxT("%ld"), index));
+      gPrefs->Write(group + "Count", count);
+      gPrefs->Flush();
+   }
+
+   bool CanReplaceChain(AudacityProject &project)
+   {
+      return !ProjectAudioIO::Get(project).IsAudioActive() &&
+         !RealtimeEffectManager::Get(project).IsActive();
+   }
+
+   void ManageChainPresets(wxWindow &parent, bool master, RealtimeEffectList &chain)
+   {
+      auto presets = ReadChainPresets(master);
+      wxDialog dialog(&parent, wxID_ANY,
+         master ? _("Manage Master Presets") : _("Manage Track Presets"));
+      auto *layout = safenew wxBoxSizer(wxVERTICAL);
+      auto *list = safenew wxListBox(&dialog, wxID_ANY, wxDefaultPosition, wxSize(400, 210));
+      list->SetName(_("Realtime effect presets"));
+      layout->Add(list, 1, wxEXPAND | wxALL, 8);
+      auto *actions = safenew wxBoxSizer(wxHORIZONTAL);
+      auto *save = safenew wxButton(&dialog, wxID_ANY, _("Save Current…"));
+      auto *update = safenew wxButton(&dialog, wxID_ANY, _("Update from Current"));
+      auto *rename = safenew wxButton(&dialog, wxID_ANY, _("Rename…"));
+      auto *remove = safenew wxButton(&dialog, wxID_ANY, _("Remove"));
+      for (auto *button : {save, update, rename, remove})
+         actions->Add(button, 0, wxRIGHT, 4);
+      layout->Add(actions, 0, wxLEFT | wxRIGHT | wxBOTTOM, 8);
+      layout->Add(dialog.CreateStdDialogButtonSizer(wxOK | wxCANCEL), 0, wxEXPAND | wxALL, 8);
+
+      const auto updateButtons = [&] {
+         const bool selected = list->GetSelection() != wxNOT_FOUND;
+         const bool hasEffects = chain.GetStatesCount() != 0;
+         save->Enable(hasEffects);
+         update->Enable(selected && hasEffects);
+         rename->Enable(selected);
+         remove->Enable(selected);
+      };
+      const auto populate = [&](int row) {
+         wxArrayString names;
+         for (const auto &preset : presets)
+            names.Add(preset.name);
+         list->Set(names);
+         if (row >= 0 && static_cast<size_t>(row) < presets.size())
+            list->SetSelection(row);
+         updateButtons();
+      };
+      const auto getName = [&](int row) -> std::optional<wxString> {
+         wxTextEntryDialog nameDialog(&dialog, _("Preset name"), _("Realtime Effect Preset"),
+            row == wxNOT_FOUND ? wxString{} : presets[row].name);
+         if (nameDialog.ShowModal() != wxID_OK)
+            return {};
+         auto name = nameDialog.GetValue();
+         name.Trim().Trim(false);
+         for (size_t index = 0; index < presets.size(); ++index) {
+            if (static_cast<int>(index) != row && name.CmpNoCase(presets[index].name) == 0) {
+               wxMessageBox(_("A preset with that name already exists."), dialog.GetTitle(),
+                  wxOK | wxICON_WARNING, &dialog);
+               return {};
+            }
+         }
+         return name.empty() ? std::nullopt : std::optional<wxString>{name};
+      };
+      const auto capture = [&]() -> std::optional<wxString> {
+         if (chain.GetStatesCount() == 0)
+            return {};
+         for (size_t index = 0; index < chain.GetStatesCount(); ++index) {
+            auto state = chain.GetStateAt(index);
+            if (!state->GetEffect()) {
+               wxMessageBox(_("This chain contains a missing effect."), dialog.GetTitle(),
+                  wxOK | wxICON_WARNING, &dialog);
+               return {};
+            }
+            state->CommitPendingSettings();
+         }
+         XMLStringWriter xml;
+         chain.WriteXML(xml);
+         return static_cast<const wxString &>(xml);
+      };
+      save->Bind(wxEVT_BUTTON, [&](wxCommandEvent &) {
+         if (auto name = getName(wxNOT_FOUND))
+            if (auto xml = capture()) {
+               presets.push_back({std::move(*name), std::move(*xml)});
+               populate(static_cast<int>(presets.size()) - 1);
+            }
+      });
+      update->Bind(wxEVT_BUTTON, [&](wxCommandEvent &) {
+         const auto row = list->GetSelection();
+         if (row != wxNOT_FOUND)
+            if (auto xml = capture())
+               presets[row].xml = std::move(*xml);
+      });
+      rename->Bind(wxEVT_BUTTON, [&](wxCommandEvent &) {
+         const auto row = list->GetSelection();
+         if (row != wxNOT_FOUND)
+            if (auto name = getName(row)) {
+               presets[row].name = std::move(*name);
+               populate(row);
+            }
+      });
+      remove->Bind(wxEVT_BUTTON, [&](wxCommandEvent &) {
+         const auto row = list->GetSelection();
+         if (row != wxNOT_FOUND) {
+            presets.erase(presets.begin() + row);
+            populate(std::min(row, static_cast<int>(presets.size()) - 1));
+         }
+      });
+      list->Bind(wxEVT_LISTBOX, [&](wxCommandEvent &) { updateButtons(); });
+      populate(0);
+      dialog.SetSizerAndFit(layout);
+      dialog.CentreOnParent();
+      if (dialog.ShowModal() == wxID_OK)
+         WriteChainPresets(master, presets);
    }
 
    using FavoriteMenuItems = std::vector<std::pair<int, wxString>>;
@@ -977,10 +1135,20 @@ public:
 
       std::optional<wxString> effectID;
       if (favorite) {
+         bool manageFavorites = false;
          wxMenu menu;
          for (const auto &[item, id] : AppendFavoriteItems(menu, ReadFavorites()))
             menu.Bind(wxEVT_MENU, [&, id](wxCommandEvent &) { effectID = id; }, item);
+         menu.AppendSeparator();
+         auto *manage = menu.Append(wxID_ANY, _("Manage Favorites…"));
+         menu.Bind(wxEVT_MENU, [&](wxCommandEvent &) {
+            manageFavorites = true;
+         }, manage->GetId());
          button.PopupMenu(&menu, button.GetClientRect().GetLeftBottom());
+         if (manageFavorites) {
+            RealtimeEffectPanel::ManageFavorites(*this);
+            return;
+         }
       }
       else
          effectID = PickEffect(&button, {});
@@ -1154,6 +1322,9 @@ RealtimeEffectPanel::RealtimeEffectPanel(
    };
 
    mTrackTitle = addStackHeader(XO("Track effects power"), {}, mTrackPower);
+   mTrackTitle->Bind(wxEVT_CONTEXT_MENU, [this](wxContextMenuEvent &) {
+      ShowChainPresetMenu(*mTrackTitle, false);
+   });
    auto *EffectList = safenew ThemedWindowWrapper<RealtimeEffectListWindow>(this, wxID_ANY);
    EffectList->SetBackgroundColorIndex(clrMedium);
    mEffectList = EffectList;
@@ -1161,7 +1332,10 @@ RealtimeEffectPanel::RealtimeEffectPanel(
 
    vSizer->Add(safenew wxStaticLine(this), 0, wxEXPAND | wxLEFT | wxRIGHT, 6);
 
-   addStackHeader(XO("Master effects power"), XO("Master"), mMasterPower);
+   auto *masterTitle = addStackHeader(XO("Master effects power"), XO("Master"), mMasterPower);
+   masterTitle->Bind(wxEVT_CONTEXT_MENU, [this, masterTitle](wxContextMenuEvent &) {
+      ShowChainPresetMenu(*masterTitle, true);
+   });
    auto *MasterList = safenew ThemedWindowWrapper<RealtimeEffectListWindow>(this, wxID_ANY);
    MasterList->SetBackgroundColorIndex(clrMedium);
    mMasterList = MasterList;
@@ -1420,6 +1594,83 @@ void RealtimeEffectPanel::OnCharHook(wxKeyEvent& evt)
       Close();
    else
       evt.Skip();
+}
+
+void RealtimeEffectPanel::ShowChainPresetMenu(wxWindow &anchor, bool master)
+{
+   const auto track = mCurrentTrack.lock();
+   if (!master && !track)
+      return;
+
+   auto &chain = master ? RealtimeEffectList::Get(mProject) : RealtimeEffectList::Get(*track);
+   const auto presets = ReadChainPresets(master);
+   wxMenu menu;
+   const bool canReplace = CanReplaceChain(mProject);
+   auto *none = menu.Append(wxID_ANY, _("None"));
+   none->Enable(canReplace && chain.GetStatesCount() != 0);
+   int chosen = wxID_NONE;
+   menu.Bind(wxEVT_MENU, [&](wxCommandEvent &event) { chosen = event.GetId(); });
+
+   std::vector<int> ids;
+   for (const auto &preset : presets) {
+      auto label = preset.name;
+      label.Replace("&", "&&");
+      auto *item = menu.Append(wxID_ANY, label);
+      item->Enable(canReplace);
+      ids.push_back(item->GetId());
+   }
+   menu.AppendSeparator();
+   auto *manage = menu.Append(wxID_ANY, _("Manage Presets…"));
+   anchor.PopupMenu(&menu, anchor.GetClientRect().GetBottomLeft());
+
+   if (!master && !TrackList::Get(mProject).Lock<SampleTrack>(
+          std::weak_ptr<SampleTrack>{track}))
+      return;
+
+   if (chosen == manage->GetId()) {
+      ManageChainPresets(*this, master, chain);
+      return;
+   }
+   if (!CanReplaceChain(mProject))
+      return;
+
+   RealtimeEffectList replacement;
+   TranslatableString description;
+   if (chosen == none->GetId()) {
+      if (chain.GetStatesCount() == 0)
+         return;
+      description = XO("Cleared realtime effects");
+   }
+   else {
+      const auto item = std::find(ids.begin(), ids.end(), chosen);
+      if (item == ids.end())
+         return;
+
+      const auto &preset = presets[std::distance(ids.begin(), item)];
+      XMLFileReader reader;
+      bool valid = reader.ParseString(&replacement, preset.xml) &&
+         replacement.GetStatesCount() != 0;
+      for (size_t index = 0; valid && index < replacement.GetStatesCount(); ++index) {
+         const auto state = replacement.GetStateAt(index);
+         valid = state && state->GetEffect();
+      }
+      if (!valid) {
+         wxMessageBox(_("This preset could not be loaded. Check that its effects are installed."),
+            _("Realtime Effect Presets"), wxOK | wxICON_WARNING, this);
+         return;
+      }
+      description = XO("Applied realtime effect preset %s").Format(preset.name);
+   }
+
+   chain.Visit([](RealtimeEffectState &state, bool) {
+      RealtimeEffectStateUI::Get(state).Hide();
+   });
+   chain.ReplaceInactiveChain(replacement);
+   if (!master) {
+      UpdateRealtimeEffectUIData(*track);
+      TrackPanel::Get(mProject).RefreshTrack(track.get());
+   }
+   ProjectHistory::Get(mProject).PushState(description, XO("Realtime Effect Preset"));
 }
 
 void RealtimeEffectPanel::ManageFavorites(wxWindow &parent)

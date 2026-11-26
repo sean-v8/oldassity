@@ -116,6 +116,9 @@ public:
    //! Use only in the main thread.  Sends Remove messages
    void Clear();
 
+   //! Replace the chain while its realtime engine is inactive.
+   void ReplaceInactiveChain(RealtimeEffectList &source);
+
    //! Report the position of a state in the list
    std::optional<size_t> FindState(
       const std::shared_ptr<RealtimeEffectState> &pState) const;

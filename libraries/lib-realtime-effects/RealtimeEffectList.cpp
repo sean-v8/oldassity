@@ -168,6 +168,15 @@ void RealtimeEffectList::Clear()
          { RealtimeEffectListMessage::Type::Remove, index, {}, temp[index] });
 }
 
+void RealtimeEffectList::ReplaceInactiveChain(RealtimeEffectList &source)
+{
+   {
+      LockGuard guard{mLock};
+      mStates.swap(source.mStates);
+   }
+   Publish({RealtimeEffectListMessage::Type::Reset, {}, {}, {}});
+}
+
 std::optional<size_t> RealtimeEffectList::FindState(
    const std::shared_ptr<RealtimeEffectState> &pState) const
 {

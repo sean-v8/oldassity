@@ -86,6 +86,7 @@ public:
    
 private:
    void OnCharHook(wxKeyEvent& evt);
+   void ShowChainPresetMenu(wxWindow &anchor, bool master);
    void ShowPanelWindow(bool focus);
    void UpdatePowerButtons();
    void SavePowerSettings();
