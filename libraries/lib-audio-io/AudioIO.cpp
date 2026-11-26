@@ -2184,6 +2184,9 @@ bool AudioIO::ProcessPlaybackSlices(
       buffer.resize(samplesAvailable, 0);
    }
 
+   // Smooth track gain changes independently of transport microfades.
+   const auto fadeFrames = std::min(samplesAvailable,
+      static_cast<size_t>(std::max(1.0, mRate * 0.005)));
    size_t bufferIndex = 0;
    const bool hasSolo = mbHasSoloSequences.load(std::memory_order_relaxed) ||
       std::any_of(mPlaybackSequences.begin(), mPlaybackSequences.end(),
@@ -2195,13 +2198,14 @@ bool AudioIO::ProcessPlaybackSlices(
       for (size_t channel = 0; channel < mNumPlaybackChannels; ++channel) {
          const auto gain = silent ? 0.0f : sequence.GetChannelGain(channel);
          auto &previous = mMasterInputGains[index][channel];
-         const auto fade = mbMicroFades ? std::min(samplesAvailable,
-            static_cast<size_t>(std::max(1.0, mRate * 0.005))) : size_t{0};
-         const auto step = fade ? (gain - previous) / fade : 0.0f;
+         const auto fade = gain != previous ? fadeFrames : 0;
          const auto &source = mProcessingBuffers[bufferIndex + std::min(channel, channels - 1)];
          auto &master = mMasterBuffers[channel];
-         for (size_t i = 0; i < fade; ++i)
-            master[i] += source[i] * (previous + i * step);
+         for (size_t i = 0; i < fade; ++i) {
+            const float t = static_cast<float>(i) / fade;
+            const float blend = t * t * (3.0f - 2.0f * t);
+            master[i] += source[i] * (previous + (gain - previous) * blend);
+         }
          for (size_t i = fade; i < samplesAvailable; ++i)
             master[i] += source[i] * gain;
          previous = gain;

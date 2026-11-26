@@ -310,6 +310,13 @@ void OnCycleAllTrackHeights(const CommandContext &context)
       FinishTrackHeightChange(project);
 }
 
+void OnSetTrackHeightsByPan(const CommandContext &context)
+{
+   auto &project = context.project;
+   WaveTrackControls::SetHeightsByPan(TrackList::Get(project));
+   FinishTrackHeightChange(project);
+}
+
 void OnGoSelStart(const CommandContext &context)
 {
    auto &project = context.project;
@@ -466,7 +473,9 @@ BaseItemSharedPtr ViewMenu()
             Command( wxT("CycleTrackHeight"), XXO("Cycle Focused Track Height"),
                FN(OnCycleTrackHeight), WaveTracksExistFlag() ),
             Command( wxT("CycleAllTrackHeights"), XXO("Cycle All Audio Track Heights"),
-               FN(OnCycleAllTrackHeights), WaveTracksExistFlag() )
+               FN(OnCycleAllTrackHeights), WaveTracksExistFlag() ),
+            Command( wxT("SetTrackHeightsByPan"), XXO("Set Audio Track Heights by Pan"),
+               FN(OnSetTrackHeightsByPan), WaveTracksExistFlag() )
          ),
 
          Menu( wxT("SkipTo"), XXO("Sk&ip to"),

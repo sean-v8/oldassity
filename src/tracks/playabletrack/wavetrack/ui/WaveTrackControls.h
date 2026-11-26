@@ -48,6 +48,7 @@ public:
    static unsigned DefaultWaveTrackHeight();
    static void CycleHeight(WaveTrack &track);
    static bool CycleAllHeights(TrackList &tracks);
+   static void SetHeightsByPan(TrackList &tracks);
    static void GetGainRect(const wxPoint & topLeft, wxRect &dest);
    static void GetPanRect(const wxPoint & topLeft, wxRect &dest);
 

@@ -60,16 +60,18 @@ UIHandle::Result TrackPanelResizeHandle::Click(
    const TrackPanelMouseEvent &evt, AudacityProject *pProject )
 {
    using namespace RefreshCode;
-   if (mTopEdge && (evt.event.LeftDown() || evt.event.LeftDClick())) {
+   if ((mTopEdge && evt.event.LeftDown()) ||
+       (evt.event.LeftDClick() && mMode != IsResizingBetweenLinkedTracks)) {
       auto channel = FindChannel();
       if (!channel)
          return Cancelled;
-      auto &track = static_cast<WaveTrack &>(GetTrack(*channel));
-      TrackFocus::Get(*pProject).Set(&track);
-      if (evt.event.LeftDClick()) {
-         WaveTrackControls::CycleHeight(track);
-         ProjectHistory::Get(*pProject).ModifyState(false);
-         return Cancelled | RefreshAll | FixScrollbars;
+      if (auto *track = dynamic_cast<WaveTrack *>(&GetTrack(*channel))) {
+         TrackFocus::Get(*pProject).Set(track);
+         if (evt.event.LeftDClick()) {
+            WaveTrackControls::CycleHeight(*track);
+            ProjectHistory::Get(*pProject).ModifyState(false);
+            return Cancelled | RefreshAll | FixScrollbars;
+         }
       }
    }
    if (evt.event.LeftDClick() && mMode == IsResizingBetweenLinkedTracks) {
@@ -276,7 +278,9 @@ UIHandle::Result TrackPanelResizeHandle::Drag
 HitTestPreview TrackPanelResizeHandle::Preview
 (const TrackPanelMouseState &, AudacityProject *)
 {
-   if (mTopEdge) {
+   const auto channel = FindChannel();
+   if (mMode != IsResizingBetweenLinkedTracks && channel &&
+       dynamic_cast<WaveTrack *>(&GetTrack(*channel))) {
       auto preview = HitPreview(false);
       preview.message = XO("Drag to resize this track, or double-click to cycle its height.");
       return preview;

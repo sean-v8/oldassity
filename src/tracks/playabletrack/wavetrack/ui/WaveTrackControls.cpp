@@ -1181,6 +1181,13 @@ bool WaveTrackControls::CycleAllHeights(TrackList &tracks)
    return true;
 }
 
+void WaveTrackControls::SetHeightsByPan(TrackList &tracks)
+{
+   const auto heights = TrackHeightPresets();
+   for (auto *track : tracks.Any<WaveTrack>())
+      ApplyTrackHeight(*track, track->GetPan() == 0.0f ? heights[1] : heights[2]);
+}
+
 unsigned WaveTrackControls::DefaultWaveTrackHeight()
 {
    return TrackInfo::DefaultTrackHeight( waveTrackTCPLines );
