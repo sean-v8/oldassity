@@ -247,8 +247,11 @@ def plugin_settings(config):
     if not config.is_file():
         return ""
     groups = {}
-    omitted = 0
-    for group, entries in sections(config).items():
+    unexpected = []
+    for number, (group, entries) in enumerate(sections(config).items(), 1):
+        if group == "providercustompaths":
+            print("Excluded plugin search directories: machine-local paths.", file=sys.stderr)
+            continue
         if not group:
             groups[group] = {
                 key: value for key, value in entries.items()
@@ -260,27 +263,36 @@ def plugin_settings(config):
             group,
         )
         if not match:
-            omitted += 1
+            unexpected.append((number, "unrecognized header"))
             continue
         try:
             identifier = base64.b64decode(re.sub(r"\\([+/=])", r"\1", match[1]), validate=True).decode("utf-8")
         except (UnicodeError, binascii.Error):
-            omitted += 1
+            unexpected.append((number, "invalid encoded plugin ID"))
             continue
         subgroup = (match[3] or "").lstrip("/").replace(r"\ ", " ")
         if (not portable_effect_settings_id(identifier)
                 or subgroup and not all(re.fullmatch(IDENT, part) for part in subgroup.split("/"))):
-            omitted += 1
+            unexpected.append((number, "plugin ID or subgroup failed validation"))
             continue
         if all(not FILE_SETTING.search(key) and portable(key) and portable(value)
                for key, value in entries.items()):
             groups[group] = entries
+        elif (
+            identifier.endswith("_EQ XML to TXT Converter")
+            and subgroup in {"FactoryDefaults", "CurrentSettings"}
+            and any(re.search(r"\bINFILE\s*=", value, re.I) for value in entries.values())
+        ):
+            print(
+                f"Excluded EQ XML to TXT Converter ({subgroup}): INFILE is a file reference.",
+                file=sys.stderr,
+            )
         else:
-            omitted += 1
+            unexpected.append((number, "parameter name or value failed the portability check"))
     captured = sum(bool(group and entries) for group, entries in groups.items())
     print(f"Captured {captured} plugin settings sections.", file=sys.stderr)
-    if omitted:
-        print(f"Skipped {omitted} plugin settings sections with unrecognized or nonportable data.", file=sys.stderr)
+    for number, reason in unexpected:
+        print(f"WARNING: Unexpected skip in plugin settings section {number}: {reason}.", file=sys.stderr)
     return render(groups)
 
 
