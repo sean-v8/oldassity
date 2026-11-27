@@ -225,6 +225,24 @@ def collect(config):
     return render(groups)
 
 
+def portable_effect_settings_id(identifier):
+    if not identifier.startswith("Effect_"):
+        return False
+    if portable(identifier):
+        return True
+
+    fields = identifier.split("_", 3)
+    if len(fields) != 4 or fields[1] != "LV2":
+        return False
+    vendor, name = fields[2:]
+    # LV2 display labels can contain a slash, as in "Stereo Mid/Side EQ".
+    return (
+        portable(vendor)
+        and ".." not in name
+        and bool(re.fullmatch(r"[\w .()+-]+ [\w.+()-]+/[\w.+()-]+ [\w .()+-]+", name))
+    )
+
+
 def plugin_settings(config):
     if not config.is_file():
         return ""
@@ -250,7 +268,7 @@ def plugin_settings(config):
             omitted += 1
             continue
         subgroup = (match[3] or "").lstrip("/").replace(r"\ ", " ")
-        if (not identifier.startswith("Effect_") or not portable(identifier)
+        if (not portable_effect_settings_id(identifier)
                 or subgroup and not all(re.fullmatch(IDENT, part) for part in subgroup.split("/"))):
             omitted += 1
             continue
