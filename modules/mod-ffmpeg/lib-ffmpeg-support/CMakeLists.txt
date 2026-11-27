@@ -17,8 +17,6 @@ if (${_OPT}use_ffmpeg)
       wrappers/AVCodecWrapper.h
       wrappers/AVDictionaryWrapper.cpp
       wrappers/AVDictionaryWrapper.h
-      wrappers/AVFifoBufferWrapper.cpp
-      wrappers/AVFifoBufferWrapper.h
       wrappers/AVFormatContextWrapper.cpp
       wrappers/AVFormatContextWrapper.h
       wrappers/AVFrameWrapper.cpp
@@ -76,6 +74,23 @@ if (${_OPT}use_ffmpeg)
       impl/avcodec/60/AVCodecImpl.cpp
       impl/avformat/60/AVFormatImpl.cpp
       impl/avutil/58/AVUtilImpl.cpp
+
+      FifoBuffer.cpp
+      FifoBuffer.h
+      wrappers/AVChannelLayoutWrapper.h
+      impl/ffmpeg-7.0.0-single-header.h
+      impl/avutil/59/avconfig.h
+      impl/avcodec/61/AVCodecIDLookup.cpp
+      impl/avcodec/61/AVCodecImpl.cpp
+      impl/avformat/61/AVFormatImpl.cpp
+      impl/avutil/59/AVUtilImpl.cpp
+      impl/ffmpeg-8.0.0-single-header.h
+      impl/avutil/60/avconfig.h
+      impl/avcodec/62/AVCodecIDLookup.cpp
+      impl/avcodec/62/AVCodecImpl.cpp
+      impl/avformat/62/AVFormatImpl.cpp
+      impl/avutil/60/AVUtilImpl.cpp
+      impl/avutil/AVChannelLayoutWrapperImpl.inl
 
       # Loaders
       impl/avcodec/AVCodecFunctionsLoader.cpp

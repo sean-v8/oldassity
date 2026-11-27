@@ -11,9 +11,8 @@
 class AVFrameWrapperImpl : public AVFrameWrapper
 {
 public:
-   explicit
-   AVFrameWrapperImpl(const FFmpegFunctions& ffmpeg)
-      : AVFrameWrapper(ffmpeg)
+   explicit AVFrameWrapperImpl(const FFmpegFunctions& ffmpeg)
+       : AVFrameWrapper(ffmpeg)
    {
    }
 
@@ -98,8 +97,13 @@ public:
 
    int GetKeyFrame() const noexcept override
    {
-      if (mAVFrame != nullptr)
+      if (mAVFrame != nullptr) {
+      #if LIBAVUTIL_VERSION_MAJOR <= 59
          return mAVFrame->key_frame;
+      #else
+         return (mAVFrame->flags & AV_FRAME_FLAG_KEY) ? 1 : 0;
+      #endif
+      }
 
       return {};
    }
@@ -108,7 +112,7 @@ public:
    {
       if (mAVFrame != nullptr)
          return { mAVFrame->sample_aspect_ratio.num,
-               mAVFrame->sample_aspect_ratio.den };
+                  mAVFrame->sample_aspect_ratio.den };
 
       return {};
    }
@@ -137,22 +141,6 @@ public:
    {
       if (mAVFrame != nullptr)
          return mAVFrame->pkt_dts;
-
-      return {};
-   }
-
-   int GetCodedPictureNumber() const noexcept override
-   {
-      if (mAVFrame != nullptr)
-         return mAVFrame->coded_picture_number;
-
-      return {};
-   }
-
-   int GetDisplayPictureNumber() const noexcept override
-   {
-      if (mAVFrame != nullptr)
-         return mAVFrame->display_picture_number;
 
       return {};
    }
@@ -189,32 +177,39 @@ public:
 
    int GetInterlacedFrame() const noexcept override
    {
-      if (mAVFrame != nullptr)
+      if (mAVFrame != nullptr) {
+      #if LIBAVUTIL_VERSION_MAJOR <= 59
          return mAVFrame->interlaced_frame;
+      #else
+         return (mAVFrame->flags & AV_FRAME_FLAG_INTERLACED) ? 1 : 0;
+      #endif
+      }
 
       return {};
    }
 
    int GetTopFieldFirst() const noexcept override
    {
-      if (mAVFrame != nullptr)
+      if (mAVFrame != nullptr) {
+      #if LIBAVUTIL_VERSION_MAJOR <= 59
          return mAVFrame->top_field_first;
-
+      #else
+         return (mAVFrame->flags & AV_FRAME_FLAG_TOP_FIELD_FIRST) ? 1 : 0;
+      #endif
+      }
       return {};
    }
 
    int GetPaletteHasChanged() const noexcept override
    {
-      if (mAVFrame != nullptr)
+      if (mAVFrame != nullptr) {
+      #if LIBAVUTIL_VERSION_MAJOR <= 59
          return mAVFrame->palette_has_changed;
-
-      return {};
-   }
-
-   int64_t GetReorderedOpaque() const noexcept override
-   {
-      if (mAVFrame != nullptr)
-         return mAVFrame->reordered_opaque;
+      #else
+         // Deprecated without replacement
+         return {};
+      #endif
+      }
 
       return {};
    }
@@ -227,24 +222,24 @@ public:
       return {};
    }
 
-   uint64_t GetChannelLayout() const noexcept override
+   const AVChannelLayoutWrapper* GetChannelLayout() const noexcept override
    {
-      if (mAVFrame != nullptr)
-         return mAVFrame->channel_layout;
-
-      return {};
+      return GetChannelLayoutSafe();
    }
 
-   void SetChannelLayout(uint64_t layout) noexcept override
+   void SetChannelLayout(const AVChannelLayoutWrapper* layout) noexcept override
    {
-      if (mAVFrame != nullptr)
-      {
-         mAVFrame->channel_layout = layout;
-#if LIBAVUTIL_VERSION_MAJOR >= 56
-         mAVFrame->channels =
-            mFFmpeg.av_get_channel_layout_nb_channels(layout);
+      if (mAVFrame == nullptr || layout == nullptr)
+         return;
+
+      mChannelLayoutWrapper = layout->Clone();
+// Clone never returns nullptr
+#if HAS_AV_CHANNEL_LAYOUT
+      mAVFrame->ch_layout = *layout->GetChannelLayout();
+#else
+      mAVFrame->channel_layout = layout->GetLegacyChannelLayout();
+      mAVFrame->channels       = layout->GetChannelsCount();
 #endif
-      }
    }
 
    int GetSideDataCount() const noexcept override
@@ -271,22 +266,6 @@ public:
       return {};
    }
 
-   int64_t GetPacketPos() const noexcept override
-   {
-      if (mAVFrame != nullptr)
-         return mAVFrame->pkt_pos;
-
-      return {};
-   }
-
-   int64_t GetPacketDuration() const noexcept override
-   {
-      if (mAVFrame != nullptr)
-         return mAVFrame->pkt_duration;
-
-      return {};
-   }
-
    AVDictionaryWrapper GetMetadata() const noexcept override
    {
       if (mAVFrame != nullptr)
@@ -305,22 +284,37 @@ public:
 
    int GetChannels() const noexcept override
    {
-      if (mAVFrame != nullptr)
-         return mAVFrame->channels;
+      if (auto layout = GetChannelLayoutSafe(); layout != nullptr)
+         return layout->GetChannelsCount();
 
       return {};
    }
 
-   int GetPacketSize() const noexcept override
+private:
+   const AVChannelLayoutWrapper* GetChannelLayoutSafe() const noexcept
    {
-      if (mAVFrame != nullptr)
-         return mAVFrame->pkt_size;
+      if (mAVFrame == nullptr)
+         return nullptr;
 
-      return {};
+      if (mChannelLayoutWrapper == nullptr)
+      {
+#if HAS_AV_CHANNEL_LAYOUT
+         mChannelLayoutWrapper =
+            mFFmpeg.CreateAVChannelLayout(&mAVFrame->ch_layout);
+#else
+         mChannelLayoutWrapper = mFFmpeg.CreateLegacyChannelLayout(
+            mAVFrame->channel_layout, mAVFrame->channels);
+#endif
+      }
+
+      return mChannelLayoutWrapper.get();
    }
+
+   mutable std::unique_ptr<AVChannelLayoutWrapper> mChannelLayoutWrapper;
 };
 
-std::unique_ptr<AVFrameWrapper> CreateAVFrameWrapper(const FFmpegFunctions& ffmpeg)
+std::unique_ptr<AVFrameWrapper>
+CreateAVFrameWrapper(const FFmpegFunctions& ffmpeg)
 {
    return std::make_unique<AVFrameWrapperImpl>(ffmpeg);
 }
