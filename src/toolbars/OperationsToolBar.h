@@ -4,6 +4,7 @@
 #include "ToolBar.h"
 #include "Observer.h"
 
+#include <cstdint>
 #include <deque>
 #include <memory>
 #include <wx/timer.h>
@@ -53,7 +54,11 @@ private:
    struct Render;
    void ValidateRenderSources(const Render &render);
    void ShowRenderQueue();
-   bool mViewingQueue{};
+   void UpdateQueueDisplay();
+   void CancelQueuedRender(std::uint64_t id);
+   struct QueueDialog;
+   std::unique_ptr<QueueDialog> mQueueDialog;
+   std::uint64_t mNextRenderId{};
    Observer::Subscription mUndoSubscription, mTrackSubscription;
    std::unique_ptr<Render> mRender;
    std::deque<std::unique_ptr<Render>> mRenderQueue;

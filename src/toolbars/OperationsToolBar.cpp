@@ -23,8 +23,10 @@
 #include <chrono>
 #include <cmath>
 #include <limits>
+#include <vector>
 #include <wx/button.h>
-#include <wx/choicdlg.h>
+#include <wx/dialog.h>
+#include <wx/scrolwin.h>
 #include <wx/sizer.h>
 #include <wx/evtloop.h>
 #include <wx/eventfilter.h>
@@ -76,6 +78,7 @@ wxString SourceState(const Track &track)
 }
 
 struct OperationsToolBar::Render {
+   std::uint64_t id{};
    // The mixer borrows tracks and the time-warp envelope. Keep private copies
    // alive until after the mixer and its detached output have been destroyed.
    TrackListHolder sources{ TrackList::Create(nullptr) };
@@ -100,6 +103,96 @@ struct OperationsToolBar::Render {
    TranslatableString label;
 };
 
+struct OperationsToolBar::QueueDialog final : wxDialog
+{
+   struct Item {
+      std::uint64_t id;
+      wxString label;
+      int progress;
+      bool cancellable;
+   };
+
+   explicit QueueDialog(OperationsToolBar &toolbar)
+      : wxDialog(&toolbar, wxID_ANY,
+           XO("Operations Queue").Translation(), wxDefaultPosition, wxDefaultSize,
+           wxDEFAULT_DIALOG_STYLE | wxRESIZE_BORDER)
+      , mToolbar{toolbar}
+   {
+      auto *layout = safenew wxBoxSizer(wxVERTICAL);
+      mList = safenew wxScrolledWindow(this, wxID_ANY);
+      mList->SetScrollRate(0, 12);
+      mList->SetSizer(safenew wxBoxSizer(wxVERTICAL));
+      layout->Add(mList, 1, wxEXPAND | wxALL, 8);
+
+      auto *close = safenew wxButton(this, wxID_CLOSE, XO("Close").Translation());
+      close->Bind(wxEVT_BUTTON, [this](wxCommandEvent &) { Hide(); });
+      Bind(wxEVT_CLOSE_WINDOW, [this](wxCloseEvent &) { Hide(); });
+      layout->Add(close, 0, wxALIGN_RIGHT | wxRIGHT | wxBOTTOM, 8);
+      SetSizer(layout);
+      SetSize(FromDIP(wxSize(560, 280)));
+   }
+
+   void UpdateItems(const std::vector<Item> &items)
+   {
+      if (!IsShown())
+         return;
+      if (!mList->GetSizer()->GetItemCount() || items.size() != mRows.size() ||
+          !std::equal(items.begin(), items.end(), mRows.begin(),
+             [](const Item &item, const Row &row) { return item.id == row.id; }))
+      {
+         auto *layout = mList->GetSizer();
+         layout->Clear(true);
+         mRows.clear();
+         if (items.empty())
+            layout->Add(safenew wxStaticText(mList, wxID_ANY,
+               XO("No active or pending operations").Translation()), 0, wxALL, 4);
+
+         for (const auto &item : items) {
+            auto *line = safenew wxBoxSizer(wxHORIZONTAL);
+            auto *label = safenew wxStaticText(mList, wxID_ANY, wxString{},
+               wxDefaultPosition, FromDIP(wxSize(140, -1)),
+               wxST_ELLIPSIZE_END | wxST_NO_AUTORESIZE);
+            auto *progress = safenew wxGauge(mList, wxID_ANY, progressRange,
+               wxDefaultPosition, FromDIP(wxSize(100, -1)));
+            auto *cancel = safenew wxButton(mList, wxID_ANY, XO("Cancel").Translation());
+            cancel->Bind(wxEVT_BUTTON, [this, id = item.id](wxCommandEvent &) {
+               // Updating the list may delete this button.
+               CallAfter([this, id] { mToolbar.CancelQueuedRender(id); });
+            });
+            line->Add(label, 1, wxALIGN_CENTER_VERTICAL | wxRIGHT, 6);
+            line->Add(progress, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 6);
+            line->Add(cancel, 0, wxALIGN_CENTER_VERTICAL);
+            layout->Add(line, 0, wxEXPAND | wxALL, 4);
+            mRows.push_back({item.id, label, progress, cancel});
+         }
+         mList->Layout();
+         mList->FitInside();
+      }
+
+      for (size_t i = 0; i < items.size(); ++i) {
+         const auto &item = items[i];
+         const auto &row = mRows[i];
+         if (row.label->GetLabel() != item.label) {
+            row.label->SetLabel(item.label);
+            row.label->SetToolTip(item.label);
+         }
+         row.progress->SetValue(item.progress);
+         row.cancel->Enable(item.cancellable);
+      }
+   }
+
+private:
+   struct Row {
+      std::uint64_t id;
+      wxStaticText *label;
+      wxGauge *progress;
+      wxButton *cancel;
+   };
+   OperationsToolBar &mToolbar;
+   wxScrolledWindow *mList{};
+   std::vector<Row> mRows;
+};
+
 struct OperationsToolBar::EffectProgress final
    : BasicUI::ProgressDialog, wxEventFilter
 {
@@ -112,6 +205,8 @@ struct OperationsToolBar::EffectProgress final
       // Keep Cancel reachable in the docked toolbar or its floating frame.
       // wxWidgets 3.1 can exempt only one top-level window.
       disabler = std::make_unique<wxWindowDisabler>(toolbarWindow);
+      if (toolbar.mQueueDialog)
+         toolbar.mQueueDialog->Enable();
       wxEvtHandler::AddFilter(this);
    }
 
@@ -133,7 +228,7 @@ struct OperationsToolBar::EffectProgress final
       const auto *top = wxGetTopLevelParent(window);
       if (top != projectWindow && top != toolbarWindow)
          return Event_Skip;
-      if (window == toolbar.mCancel || window == toolbar.mStop)
+      if (window == toolbar.mCancel || window == toolbar.mStop || window == toolbar.mQueue)
          return Event_Skip;
       if (type == wxEVT_CLOSE_WINDOW || type == wxEVT_CONTEXT_MENU ||
           event.GetEventCategory() == wxEVT_CATEGORY_USER_INPUT ||
@@ -213,6 +308,7 @@ OperationsToolBar::OperationsToolBar(AudacityProject &project)
 OperationsToolBar::~OperationsToolBar()
 {
    mTimer.Stop();
+   mQueueDialog.reset();
    mRender.reset();
 }
 
@@ -285,7 +381,7 @@ void OperationsToolBar::EnableDisableButtons()
       relayout = true;
    }
    mCancel->Enable(IsRunning());
-   mQueue->Enable(!mEffectProgress && (mRender || !mRenderQueue.empty()));
+   mQueue->Enable(IsRunning());
    if (relayout)
       Layout();
 }
@@ -346,38 +442,54 @@ void OperationsToolBar::UpdateDisplay()
       Layout();
    }
    EnableDisableButtons();
+   UpdateQueueDisplay();
 }
 
 void OperationsToolBar::ShowRenderQueue()
 {
-   wxArrayString entries;
-   if (mRender)
-      entries.Add(XO("Active: %s").Format(mRender->label).Translation());
-   for (const auto &render : mRenderQueue)
-      entries.Add(XO("Pending: %s").Format(render->label).Translation());
-   if (entries.empty())
+   if (!mQueueDialog)
+      mQueueDialog = std::make_unique<QueueDialog>(*this);
+   mQueueDialog->Show();
+   UpdateQueueDisplay();
+   mQueueDialog->Raise();
+}
+
+void OperationsToolBar::UpdateQueueDisplay()
+{
+   if (!mQueueDialog || !mQueueDialog->IsShown())
       return;
 
-   wxSingleChoiceDialog dialog(this, XO("Select a render to cancel it.").Translation(),
-      XO("Render Queue").Translation(), entries);
-   if (auto *button = dialog.FindWindow(wxID_OK))
-      button->SetLabel(XO("Cancel selected render").Translation());
-   if (auto *button = dialog.FindWindow(wxID_CANCEL))
-      button->SetLabel(XO("Close").Translation());
-   dialog.GetSizer()->SetSizeHints(&dialog);
-   auto viewing = valueRestorer(mViewingQueue, true);
-   if (dialog.ShowModal() != wxID_OK)
-      return;
-   auto row = dialog.GetSelection();
-   if (mRender) {
-      if (row == 0) {
-         AdvanceRenderQueue();
-         return;
-      }
-      --row;
+   std::vector<QueueDialog::Item> items;
+   if (mEffectProgress) {
+      const auto &effect = *mEffectProgress;
+      const auto &label = effect.message.empty() ? effect.title : effect.message;
+      items.push_back({0, label.Translation(),
+         static_cast<int>(effect.fraction * progressRange), false});
    }
-   if (row >= 0 && static_cast<size_t>(row) < mRenderQueue.size())
-      mRenderQueue.erase(mRenderQueue.begin() + row);
+   if (mRender) {
+      auto status = mRender->complete ? XO("Waiting to add result: %s") :
+         mEffectProgress ? XO("Paused: %s") : XO("Active: %s");
+      items.push_back({mRender->id, status.Format(mRender->label).Translation(),
+         mRender->progress, !mEffectProgress});
+   }
+   for (const auto &render : mRenderQueue)
+      items.push_back({render->id, XO("Pending: %s").Format(render->label).Translation(),
+         0, !mEffectProgress});
+   mQueueDialog->UpdateItems(items);
+}
+
+void OperationsToolBar::CancelQueuedRender(std::uint64_t id)
+{
+   if (mEffectProgress)
+      return;
+   if (mRender && mRender->id == id) {
+      AdvanceRenderQueue();
+      return;
+   }
+   const auto pending = std::find_if(mRenderQueue.begin(), mRenderQueue.end(),
+      [id](const auto &render) { return render->id == id; });
+   if (pending != mRenderQueue.end())
+      mRenderQueue.erase(pending);
    UpdateDisplay();
 }
 
@@ -403,6 +515,7 @@ void OperationsToolBar::StartMixRender(bool replaceSources)
       return;
 
    auto render = std::make_unique<Render>();
+   render->id = ++mNextRenderId;
    render->replaceSources = replaceSources;
    render->sourceCount = selected.size();
    render->waveColor = (*selected.begin())->GetWaveColorIndex();
@@ -476,7 +589,7 @@ void OperationsToolBar::Cancel()
 bool OperationsToolBar::CanServiceRender() const
 {
    const auto &window = ProjectWindow::Get(mProject);
-   return !mViewingQueue && !mEffectProgress && !window.IsBeingDeleted() && window.IsEnabled() &&
+   return !mEffectProgress && !window.IsBeingDeleted() && window.IsEnabled() &&
       !mProject.mbBusyImporting;
 }
 
