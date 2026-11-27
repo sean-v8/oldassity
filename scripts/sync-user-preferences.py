@@ -237,12 +237,15 @@ def plugin_settings(config):
                 if key == "pluginsettingsversion" and re.fullmatch(r"[0-9.]+", value)
             }
             continue
-        match = re.fullmatch(r"pluginsettings/base64:([A-Za-z0-9+/=]+)/(shared|private)(/.*)?", group)
+        match = re.fullmatch(
+            r"pluginsettings/base64\\?:([A-Za-z0-9+/]+(?:\\?=){0,2})/(shared|private)(/.*)?",
+            group,
+        )
         if not match:
             omitted += 1
             continue
         try:
-            identifier = base64.b64decode(match[1], validate=True).decode("utf-8")
+            identifier = base64.b64decode(match[1].replace(r"\=", "="), validate=True).decode("utf-8")
         except (UnicodeError, binascii.Error):
             omitted += 1
             continue
@@ -256,6 +259,8 @@ def plugin_settings(config):
             groups[group] = entries
         else:
             omitted += 1
+    captured = sum(bool(group and entries) for group, entries in groups.items())
+    print(f"Captured {captured} plugin settings sections.", file=sys.stderr)
     if omitted:
         print(f"Skipped {omitted} plugin settings sections with unrecognized or nonportable data.", file=sys.stderr)
     return render(groups)
