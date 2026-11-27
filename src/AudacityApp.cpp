@@ -2730,11 +2730,32 @@ void AudacityApp::AssociateFileTypes()
 }
 #endif
 
+namespace
+{
+constexpr char shippedPreferences[] =
+#include "OldassityPreferenceDefaults.inc"
+;
+
+void SeedShippedPreferences(const wxFileName &config)
+{
+   if (sizeof(shippedPreferences) == 1 || config.FileExists())
+      return;
+
+   // Write the complete profile before exposing it as the local config.
+   wxTempFile seed(config.GetFullPath());
+   if (seed.IsOpened() &&
+       seed.Write(shippedPreferences, sizeof(shippedPreferences) - 1) &&
+       !config.FileExists())
+      seed.Commit();
+}
+}
+
 static audacity::ApplicationSettings::Scope applicationSettingsScope {
    []{
       static std::once_flag configSetupFlag;
       std::call_once(configSetupFlag, [&]{
          const auto configFileName = wxFileName { FileNames::Configuration() };
+         SeedShippedPreferences(configFileName);
          gConfig = AudacityFileConfig::Create(
             wxTheApp->GetAppName(), wxEmptyString,
             configFileName.GetFullPath(),
