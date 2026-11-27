@@ -1518,102 +1518,63 @@ public:
 void ProjectFileManager::Compact()
 {
    auto &project = mProject;
-   if (const auto *operations = OperationsToolBar::Get(project);
-       operations && operations->IsRunning()) {
-      AudacityMessageBox(XO("Finish or cancel the operation before compacting this project."));
-      return;
-   }
-
    auto &undoManager = UndoManager::Get(project);
-   auto &clipboard = Clipboard::Get();
    auto &projectFileIO = ProjectFileIO::Get(project);
-   bool isBatch = project.mBatchMode > 0;
+   const auto savedState = undoManager.GetSavedState();
 
-   // Checkpoint the WAL before measuring the original database.
-   if (!projectFileIO.ReopenProject())
+   if (projectFileIO.IsTemporary() || !mLastSavedTracks || savedState < 0 ||
+       undoManager.UnsavedChanges())
    {
-      AudacityMessageBox(XO("Could not reopen the project for compaction."));
+      AudacityMessageBox(XO("Save the project before compacting it."),
+         XO("Compact Project"));
       return;
    }
 
-   const auto currentState = undoManager.GetCurrentState();
-   const auto savedState = undoManager.GetSavedState();
-   const auto savedIndex = savedState < 0 ? currentState :
-      static_cast<unsigned int>(savedState);
-   const auto least = std::min(savedIndex, currentState);
-   const auto greatest = std::max(savedIndex, currentState);
-
-   // The first list supplies the document written into the replacement file.
-   // Keep both the actual last saved audio and any edits currently on screen.
-   const auto &currentTracks = TrackList::Get(project);
-   std::vector<const TrackList*> trackLists {
-      mLastSavedTracks ? mLastSavedTracks.get() : &currentTracks,
-      &currentTracks
-   };
-   if (savedIndex != currentState)
-      undoManager.VisitStates([&](const UndoStackElem &state) {
-         if (auto *tracks = TrackList::FindUndoTracks(state))
-            trackLists.push_back(tracks);
-      }, savedIndex, savedIndex + 1);
-
-   const auto used = projectFileIO.GetCurrentUsage(trackLists);
-   const auto before = wxFileName::GetSize(projectFileIO.GetFileName());
-   const auto reclaimable = std::max<wxLongLong_t>(0, before.GetValue() - used);
-
-   CompactDialog dlg(
-         XO("Compacting this project will free up disk space by removing unused bytes within the file.\n\n"
-            "There is %s of free disk space and this project is currently using %s.\n"
-            "\n"
-            "Compaction needs room for a temporary copy of the audio being kept (about %s).\n"
-            "If compaction succeeds, it will discard Undo/Redo History and clipboard contents "
-            "and recover approximately %s of disk space.\n"
-            "\n"
-            "Do you want to continue?")
-         .Format(Internat::FormatSize(projectFileIO.GetFreeDiskSpace()),
-                  Internat::FormatSize(before.GetValue()),
-                  Internat::FormatSize(used),
-                  Internat::FormatSize(reclaimable)));
-   if (isBatch || dlg.ShowModal() == wxYES)
+   const auto fileName = projectFileIO.GetFileName();
+   if (wxFileExists(fileName + "_compact_temp") ||
+       wxFileExists(fileName + "_compact_back"))
    {
-      projectFileIO.Compact(trackLists, true);
-      if (!projectFileIO.WasCompacted())
-      {
-         if (!isBatch)
-            AudacityMessageBox(XO(
-               "The project file was not reduced. Undo/Redo and the clipboard were kept.\n"
-               "Check that the project drive has room for the temporary copy."),
-               XO("Compact Project"));
-         return;
-      }
-
-      // We can remove redo states, if they are after the saved state.
-      undoManager.RemoveStates(1 + greatest, undoManager.GetNumStates());
-
-      // We can remove all states between the current and the last saved.
-      if (least < greatest)
-         undoManager.RemoveStates(least + 1, greatest);
-
-      // We can remove all states before the current and the last saved.
-      undoManager.RemoveStates(0, least);
-
-      // And clear the clipboard, if needed
-      if (&mProject == clipboard.Project().lock().get())
-         clipboard.Clear();
-
-      auto after = wxFileName::GetSize(projectFileIO.GetFileName());
-
-      if (!isBatch)
-      {
-         AudacityMessageBox(
-            XO("Compacting actually freed %s of disk space.")
-            .Format(Internat::FormatSize((before - after).GetValue())),
-            XO("Compact Project"));
-      }
-
-      undoManager.RenameState( undoManager.GetCurrentState(),
-         XO("Compacted project file"),
-         XO("Compact") );
+      AudacityMessageBox(
+         XO("A temporary or backup file from an earlier compaction is still present."),
+         XO("Compact Project"));
+      return;
    }
+
+   const std::vector<const TrackList *> retained{mLastSavedTracks.get()};
+   const auto used = projectFileIO.GetCurrentUsage(retained);
+   const auto estimatedSize = used + used / 10 + (16LL << 20);
+   const auto freeSpace = projectFileIO.GetFreeDiskSpace().GetValue();
+   if (freeSpace >= 0 && freeSpace < estimatedSize)
+   {
+      AudacityMessageBox(
+         XO("The compacted copy needs approximately %s of free space. This drive has %s available.")
+            .Format(Internat::FormatSize(estimatedSize), Internat::FormatSize(freeSpace)),
+         XO("Compact Project"));
+      return;
+   }
+
+   CompactDialog dialog(XO(
+      "Compact this project to reclaim unused disk space? If compaction succeeds, "
+      "its Undo/Redo history and any clipboard contents copied from this project will be cleared."));
+   if (dialog.ShowModal() != wxYES)
+      return;
+
+   projectFileIO.Compact(retained, true);
+   if (!projectFileIO.WasCompacted())
+   {
+      AudacityMessageBox(XO("No smaller project file was installed. Undo/Redo history was kept."),
+         XO("Compact Project"));
+      return;
+   }
+
+   undoManager.RemoveStates(1 + savedState, undoManager.GetNumStates());
+   undoManager.RemoveStates(0, savedState);
+
+   auto &clipboard = Clipboard::Get();
+   if (&project == clipboard.Project().lock().get())
+      clipboard.Clear();
+
+   AudacityMessageBox(XO("Project compacted."), XO("Compact Project"));
 }
 
 static void RefreshAllTitles(bool bShowProjectNumbers )

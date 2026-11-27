@@ -499,15 +499,9 @@ BaseItemSharedPtr FileMenu()
                AudioIONotBusyFlag() ),
             Command( wxT("SaveCopy"), XXO("&Backup Project..."), OnSaveCopy,
                AudioIONotBusyFlag() )
-         )//,
-
-         // Bug 2600: Compact has interactions with undo/history that are bound
-         // to confuse some users.  We don't see a way to recover useful amounts 
-         // of space and not confuse users using undo.
-         // As additional space used by aup3 is 50% or so, perfectly valid
-         // approach to this P1 bug is to not provide the 'Compact' menu item.
-         //Command( wxT("Compact"), XXO("Co&mpact Project"), OnCompact,
-         //   AudioIONotBusyFlag(), wxT("Shift+A") )
+         ),
+         Command( wxT("Compact"), XXO("Co&mpact Project..."), OnCompact,
+            AudioIONotBusyFlag() )
       ),
 
       Section( "Import-Export",
