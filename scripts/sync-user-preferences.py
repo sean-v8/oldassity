@@ -96,11 +96,25 @@ def portable(value, *, chain=False, lv2=False):
     return not PRIVATE.search(value)
 
 
+def collect_favorites(value):
+    # wxFileConfig serializes the newline between IDs as a backslash escape.
+    quoted = len(value) >= 2 and value.startswith('"') and value.endswith('"')
+    if quoted:
+        value = value[1:-1]
+    favorites = re.split(r"\\n", value)
+    retained = [
+        favorite for favorite in favorites
+        if favorite.startswith("Effect_") and portable(favorite, lv2=True)
+    ]
+    skipped = sum(bool(favorite) for favorite in favorites) - len(retained)
+    print(f"Captured {len(retained)} realtime favorites. Skipped {skipped} nonportable IDs.", file=sys.stderr)
+    result = r"\n".join(retained)
+    return f'"{result}"' if quoted else result
+
+
 def allowed(group, key, value):
     if group == "NewKeys":
         return True
-    if group == "GUI" and key == "RealtimeEffectFavorites":
-        return portable(value, lv2=True)
     if CHAIN.fullmatch(group):
         return key in {"Count", "Name", "Chain"} and portable(
             value, chain=key == "Chain", lv2=key == "Chain"
@@ -150,7 +164,8 @@ def render(groups):
 
 def collect(config):
     groups = {}
-    for group, entries in sections(config).items():
+    source = sections(config)
+    for group, entries in source.items():
         if group and not all(re.fullmatch(IDENT, part) for part in group.split("/")):
             continue
         groups[group] = {
@@ -158,6 +173,13 @@ def collect(config):
             if (group == "NewKeys" or re.fullmatch(IDENT, key))
             and allowed(group, key, value)
         }
+    favorites = source.get("GUI", {}).get("RealtimeEffectFavorites")
+    if favorites is not None:
+        groups.setdefault("GUI", {})["RealtimeEffectFavorites"] = collect_favorites(favorites)
+
+    # This toolbar defaults to visible when there is no stored visibility.
+    groups.setdefault("GUI/ToolBars/Audio Setup", {}).setdefault("Show", "0")
+
     if set(groups.get("Version", {})) != {"Major", "Minor", "Micro"}:
         raise SystemExit("Expected a saved Oldassity config with version information.")
     for kind in ("Track", "Master"):
