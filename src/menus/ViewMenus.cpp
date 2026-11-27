@@ -270,6 +270,14 @@ std::optional<std::pair<double, double>> sampleView;
 std::vector<FramedTrack> framedTracks;
 double framedAmplitude = 0.0;
 
+struct RangeFrame
+{
+   WaveMeasurement measurement;
+   std::vector<std::weak_ptr<const WaveTrack>> tracks;
+};
+
+std::optional<RangeFrame> lastRangeFrame;
+
 void OnCloseSampleView(const CommandContext &context)
 {
    auto &project = context.project;
@@ -327,11 +335,31 @@ void OnFrameWaveform(const CommandContext &context)
 
    auto &selection = ViewInfo::Get(project).selectedRegion;
    const bool point = selection.isPoint();
+   const bool reuseRange = point && lastRangeFrame &&
+      selection.t0() == lastRangeFrame->measurement.time &&
+      targets.size() == lastRangeFrame->tracks.size() &&
+      std::equal(targets.begin(), targets.end(), lastRangeFrame->tracks.begin(),
+         [](const WaveTrack *track, const auto &saved) {
+            return saved.lock().get() == track;
+         });
+
    WaveMeasurement measurement;
-   for (const auto track : targets)
-      MeasureWaveform(*track, selection.t0(), selection.t1(), point, measurement);
-   if (!std::isfinite(measurement.distance))
-      return;
+   if (reuseRange)
+      measurement = lastRangeFrame->measurement;
+   else {
+      lastRangeFrame.reset();
+      for (const auto track : targets)
+         MeasureWaveform(*track, selection.t0(), selection.t1(), point, measurement);
+      if (!std::isfinite(measurement.distance))
+         return;
+
+      if (!point) {
+         lastRangeFrame.emplace();
+         lastRangeFrame->measurement = measurement;
+         for (const auto track : targets)
+            lastRangeFrame->tracks.push_back(track->SharedPointer<const WaveTrack>());
+      }
+   }
 
    framedAmplitude = measurement.target;
    for (const auto track : targets) {
