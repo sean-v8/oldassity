@@ -238,18 +238,18 @@ def plugin_settings(config):
             }
             continue
         match = re.fullmatch(
-            r"pluginsettings/base64\\?:([A-Za-z0-9+/]+(?:\\?=){0,2})/(shared|private)(/.*)?",
+            r"pluginsettings/base64\\?:((?:[A-Za-z0-9]|\\?[+/])+(?:\\?=){0,2})/(shared|private)(/.*)?",
             group,
         )
         if not match:
             omitted += 1
             continue
         try:
-            identifier = base64.b64decode(match[1].replace(r"\=", "="), validate=True).decode("utf-8")
+            identifier = base64.b64decode(re.sub(r"\\([+/=])", r"\1", match[1]), validate=True).decode("utf-8")
         except (UnicodeError, binascii.Error):
             omitted += 1
             continue
-        subgroup = (match[3] or "").lstrip("/")
+        subgroup = (match[3] or "").lstrip("/").replace(r"\ ", " ")
         if (not identifier.startswith("Effect_") or not portable(identifier)
                 or subgroup and not all(re.fullmatch(IDENT, part) for part in subgroup.split("/"))):
             omitted += 1
