@@ -44,6 +44,8 @@ It handles initialization and termination by subclassing wxApp.
 #include <wx/fs_zip.h>
 
 #include <wx/dir.h>
+#include <cstring>
+
 #include <wx/file.h>
 #include <wx/filename.h>
 
@@ -2732,21 +2734,40 @@ void AudacityApp::AssociateFileTypes()
 
 namespace
 {
-constexpr char shippedPreferences[] =
+struct ShippedMacro
+{
+   const char *name;
+   const char *contents;
+};
+
 #include "OldassityPreferenceDefaults.inc"
-;
+
+void SeedShippedFile(const wxFileName &file, const char *contents)
+{
+   if (!*contents || file.FileExists())
+      return;
+
+   wxTempFile seed(file.GetFullPath());
+   if (seed.IsOpened() && seed.Write(contents, std::strlen(contents)) &&
+       !file.FileExists())
+      seed.Commit();
+}
 
 void SeedShippedPreferences(const wxFileName &config)
 {
-   if (sizeof(shippedPreferences) == 1 || config.FileExists())
+   if (config.FileExists())
       return;
 
-   // Write the complete profile before exposing it as the local config.
-   wxTempFile seed(config.GetFullPath());
-   if (seed.IsOpened() &&
-       seed.Write(shippedPreferences, sizeof(shippedPreferences) - 1) &&
-       !config.FileExists())
-      seed.Commit();
+   SeedShippedFile(wxFileName{FileNames::PluginSettings()}, shippedPluginSettings);
+   if (shippedMacros[0].name) {
+      const auto directory = FileNames::MacroDir();
+      for (const auto &macro : shippedMacros) {
+         if (macro.name)
+            SeedShippedFile(wxFileName{directory, wxString::FromUTF8(macro.name)},
+               macro.contents);
+      }
+   }
+   SeedShippedFile(config, shippedPreferences);
 }
 }
 
