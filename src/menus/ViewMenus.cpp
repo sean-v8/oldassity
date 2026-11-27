@@ -9,6 +9,9 @@
 #include "../TrackInfo.h"
 #include "../TrackPanel.h"
 #include "../TrackPanelAx.h"
+#include "../prefs/WaveformSettings.h"
+#include "Envelope.h"
+#include "ProjectRate.h"
 #include "UndoManager.h"
 #include "ViewInfo.h"
 #include "WaveTrack.h"
@@ -23,10 +26,97 @@
 #include <wx/app.h>
 #include <wx/scrolbar.h>
 
+#include <algorithm>
+#include <array>
+#include <cmath>
+#include <limits>
 #include <numeric>
+#include <optional>
+#include <vector>
 
 // private helper classes and functions
 namespace {
+
+struct WaveMeasurement
+{
+   double minimum = std::numeric_limits<double>::infinity();
+   double maximum = -minimum;
+   double target = 0;
+   double time = 0;
+   double distance = std::numeric_limits<double>::infinity();
+
+   void Add(double value, double sampleTime, double cursor, bool point)
+   {
+      if (!std::isfinite(value))
+         return;
+      minimum = std::min(minimum, value);
+      maximum = std::max(maximum, value);
+      const auto delta = std::abs(sampleTime - cursor);
+      if (point ? delta < distance
+                : !std::isfinite(distance) || std::abs(value) > std::abs(target)
+                  || (std::abs(value) == std::abs(target) && sampleTime < time)) {
+         target = value;
+         time = sampleTime;
+         distance = delta;
+      }
+   }
+};
+
+void MeasureWaveform(
+   const WaveTrack &track, double start, double end, bool point, WaveMeasurement &result)
+{
+   std::array<float, 4096> samples;
+   for (const auto &channel : track.Channels()) {
+      for (const auto &clip : channel->Intervals()) {
+         const double origin = clip->GetPlayStartTime();
+         const double rate = clip->GetRate() / clip->GetStretchRatio();
+         const auto count = clip->GetVisibleSampleCount();
+         if (count <= 0 || start >= clip->GetPlayEndTime() ||
+             (point ? start < origin : end <= origin))
+            continue;
+
+         // Use the same clip-relative time grid as individual sample drawing.
+         const auto index = [&](double time) {
+            return sampleCount{std::ceil(std::max(0.0, (time - origin) * rate) - 1e-6)};
+         };
+         const auto center = std::min(count - 1,
+            sampleCount{std::round((start - origin) * rate)});
+         auto first = point ? std::max(sampleCount{0}, center - 2) : index(start);
+         const auto last = std::min(count, point ? center + 3 : index(end));
+         while (first < last) {
+            const auto length = std::min(last - first, sampleCount{samples.size()}).as_size_t();
+            if (!clip->GetSamples(reinterpret_cast<samplePtr>(samples.data()),
+                    floatSample, first, length, false))
+               break;
+            for (size_t i = 0; i < length; ++i) {
+               const auto time = origin + (first + i).as_double() / rate;
+               const auto gain = clip->GetEnvelope().GetValue(time, 1.0 / clip->GetRate());
+               result.Add(samples[i] * gain, time, start, point);
+            }
+            first += length;
+         }
+      }
+   }
+}
+
+double DisplayAmplitude(double value, const WaveformSettings &settings)
+{
+   if (settings.isLinear() || value == 0.0)
+      return value;
+   return std::copysign(std::max(0.0,
+      1.0 + 20.0 * std::log10(std::abs(value)) / settings.dBRange), value);
+}
+
+void SetFramedBounds(const WaveTrack &track, double anchor, double span, double fraction)
+{
+   constexpr double minimumSpan = 0.001;
+   const auto &settings = WaveformSettings::Get(track);
+   const auto limit = DisplayAmplitude(2.0, settings);
+   anchor = std::clamp(anchor, -limit, limit);
+   span = std::clamp(span, minimumSpan, 2.0 * limit);
+   const auto bottom = std::clamp(anchor - fraction * span, -limit, limit - span);
+   WaveformScale::Get(track).SetDisplayBounds(bottom, bottom + span);
+}
 
 double GetZoomOfSelection( const AudacityProject &project )
 {
@@ -169,6 +259,126 @@ struct Handler final
    : CommandHandlerObject // MUST be the first base class!
    , ClientData::Base
 {
+
+struct FramedTrack
+{
+   std::weak_ptr<const WaveTrack> track;
+   float minimum, maximum;
+};
+
+std::optional<std::pair<double, double>> sampleView;
+std::vector<FramedTrack> framedTracks;
+double framedAmplitude = 0.0;
+
+void OnCloseSampleView(const CommandContext &context)
+{
+   auto &project = context.project;
+   auto &view = ViewInfo::Get(project);
+   auto &window = ProjectWindow::Get(project);
+   if (sampleView) {
+      const auto [zoom, left] = *sampleView;
+      sampleView.reset();
+      view.SetZoom(zoom);
+      view.h = left;
+      window.FixScrollbars();
+      window.TP_ScrollWindow(left);
+      view.h = left;
+      TrackPanel::Get(project).Refresh(false);
+      return;
+   }
+
+   const auto width = view.GetTracksUsableWidth();
+   if (width <= 0)
+      return;
+   sampleView.emplace(view.GetZoom(), view.h);
+   auto rate = ProjectRate::Get(project).GetRate();
+   if (const auto track = dynamic_cast<const WaveTrack *>(TrackFocus::Get(project).Get()))
+      rate = track->GetRate();
+
+   view.SetZoom(width * rate / 32.0);
+   window.FixScrollbars();
+   window.TP_ScrollWindow(view.selectedRegion.t0() - width / (2.0 * view.GetZoom()));
+}
+
+void OnFrameWaveform(const CommandContext &context)
+{
+   auto &project = context.project;
+   auto &tracks = TrackList::Get(project);
+   if (!framedTracks.empty()) {
+      for (const auto &saved : framedTracks) {
+         if (const auto track = saved.track.lock(); track && track->GetOwner().get() == &tracks)
+            WaveformScale::Get(*track).SetDisplayBounds(saved.minimum, saved.maximum);
+      }
+      framedTracks.clear();
+      auto &panel = TrackPanel::Get(project);
+      panel.UpdateVRulers();
+      panel.Refresh(false);
+      return;
+   }
+
+   std::vector<const WaveTrack *> targets;
+   for (const auto track : tracks.Any<WaveTrack>())
+      if (track->GetSelected())
+         targets.push_back(track);
+   if (targets.empty()) {
+      if (const auto track = dynamic_cast<const WaveTrack *>(TrackFocus::Get(project).Get()))
+         targets.push_back(track);
+   }
+
+   auto &selection = ViewInfo::Get(project).selectedRegion;
+   const bool point = selection.isPoint();
+   WaveMeasurement measurement;
+   for (const auto track : targets)
+      MeasureWaveform(*track, selection.t0(), selection.t1(), point, measurement);
+   if (!std::isfinite(measurement.distance))
+      return;
+
+   framedAmplitude = measurement.target;
+   for (const auto track : targets) {
+      float minimum, maximum;
+      WaveformScale::Get(*track).GetDisplayBounds(minimum, maximum);
+      framedTracks.push_back({track->SharedPointer<const WaveTrack>(), minimum, maximum});
+      const auto &settings = WaveformSettings::Get(*track);
+      const auto bottom = DisplayAmplitude(measurement.minimum, settings);
+      const auto top = DisplayAmplitude(measurement.maximum, settings);
+      const auto span = std::max(0.001, (top - bottom) * 1.12);
+      SetFramedBounds(*track, (bottom + top) * 0.5, span, 0.5);
+   }
+
+   if (!point) {
+      selection.setTimes(measurement.time, measurement.time);
+      ProjectHistory::Get(project).ModifyState(false);
+   }
+   auto &panel = TrackPanel::Get(project);
+   panel.UpdateVRulers();
+   panel.Refresh(false);
+}
+
+void ZoomFramedWaveform(const CommandContext &context, double factor)
+{
+   auto &project = context.project;
+   for (const auto &saved : framedTracks) {
+      const auto track = saved.track.lock();
+      if (!track || track->GetOwner().get() != &TrackList::Get(project))
+         continue;
+      float minimum, maximum;
+      WaveformScale::Get(*track).GetDisplayBounds(minimum, maximum);
+      const auto anchor = DisplayAmplitude(framedAmplitude, WaveformSettings::Get(*track));
+      const double span = maximum - minimum;
+      if (span <= 0)
+         continue;
+      const auto fraction = std::clamp((anchor - minimum) / span, 0.0, 1.0);
+      SetFramedBounds(*track, anchor, span * factor, fraction);
+   }
+   if (!framedTracks.empty()) {
+      auto &panel = TrackPanel::Get(project);
+      panel.UpdateVRulers();
+      panel.Refresh(false);
+   }
+}
+
+void OnFramedZoomIn(const CommandContext &context) { ZoomFramedWaveform(context, 0.5); }
+void OnFramedZoomOut(const CommandContext &context) { ZoomFramedWaveform(context, 2.0); }
 
 void OnZoomIn(const CommandContext &context)
 {
@@ -446,7 +656,15 @@ BaseItemSharedPtr ViewMenu()
                Command( wxT("ZoomIn"), XXO("Zoom &In"), FN(OnZoomIn),
                   ZoomInAvailableFlag(), wxT("Ctrl+1") ),
                Command( wxT("ZoomNormal"), XXO("Zoom &Normal"), FN(OnZoomNormal),
-                  TracksExistFlag(), wxT("Ctrl+2") ),
+                  TracksExistFlag() ),
+               Command( wxT("CloseSampleView"), XXO("Toggle Close Sample View"), FN(OnCloseSampleView),
+                  WaveTracksExistFlag(), wxT("Ctrl+2") ),
+               Command( wxT("FrameWaveform"), XXO("Toggle Waveform Framing"), FN(OnFrameWaveform),
+                  WaveTracksExistFlag(), wxT("Shift+2") ),
+               Command( wxT("FramedWaveformZoomIn"), XXO("Zoom In on Framed Waveform"), FN(OnFramedZoomIn),
+                  WaveTracksExistFlag(), wxT("Shift+1") ),
+               Command( wxT("FramedWaveformZoomOut"), XXO("Zoom Out on Framed Waveform"), FN(OnFramedZoomOut),
+                  WaveTracksExistFlag(), wxT("Shift+3") ),
                Command( wxT("ZoomOut"), XXO("Zoom &Out"), FN(OnZoomOut),
                   ZoomOutAvailableFlag(), wxT("Ctrl+3") ),
                Command( wxT("ZoomSel"), XXO("&Zoom to Selection"), FN(OnZoomSel),
