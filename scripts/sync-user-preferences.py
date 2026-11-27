@@ -96,6 +96,27 @@ def portable(value, *, chain=False, lv2=False):
     return not PRIVATE.search(value)
 
 
+def portable_favorite(favorite):
+    favorite = re.sub(r"\\{1,2}_", "_", favorite)
+    if not favorite.startswith("Effect_"):
+        return False
+    if portable(favorite, lv2=True):
+        return True
+
+    # An LV2 ID ends in the plugin URI. LSP supplies a public URI, while
+    # the preceding vendor and display name can contain a slash (e.g. n/a).
+    prefix, separator, uri = favorite.rpartition("_http")
+    if not (separator and prefix.startswith("Effect_LV2_") and
+            LV2_ID.fullmatch("http" + uri) and ".." not in uri):
+        return False
+    # Permit slashes within display labels, but reject rooted paths,
+    # traversal, URLs, and Windows separators in the metadata.
+    metadata = html.unescape(unquote(prefix))
+    return bool(re.fullmatch(r"Effect_LV2_[\w .,+()&'!#%/-]+", metadata)
+                and ".." not in metadata
+                and not re.search(r"(^|[_\s])/|//|/(?:home|Users|tmp|mnt|share)/", metadata))
+
+
 def collect_favorites(value):
     # wxFileConfig serializes the newline between IDs as a backslash escape.
     quoted = len(value) >= 2 and value.startswith('"') and value.endswith('"')
@@ -104,7 +125,7 @@ def collect_favorites(value):
     favorites = re.split(r"\\n", value)
     retained = [
         favorite for favorite in favorites
-        if favorite.startswith("Effect_") and portable(favorite, lv2=True)
+        if portable_favorite(favorite)
     ]
     skipped = sum(bool(favorite) for favorite in favorites) - len(retained)
     print(f"Captured {len(retained)} realtime favorites. Skipped {skipped} nonportable IDs.", file=sys.stderr)
