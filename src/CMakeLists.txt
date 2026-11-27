@@ -1475,6 +1475,10 @@ else()
                RENAME oldassity.desktop )
       install( FILES "${topdir}/LICENSE.txt" "${topdir}/README.md"
                DESTINATION "${_DATADIR}/doc/${AUDACITY_NAME}" )
+      if( CMAKE_SYSTEM_NAME STREQUAL "Linux" )
+         install( PROGRAMS "${topdir}/scripts/sync-oldassity-preferences"
+                  DESTINATION "${CMAKE_INSTALL_BINDIR}" )
+      endif()
       install( FILES "${_SRCDIR}/audacity.xml"
                DESTINATION "${_DATADIR}/mime/packages" )
 

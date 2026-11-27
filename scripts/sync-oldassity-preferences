@@ -1,0 +1,4 @@
+#!/bin/sh
+set -eu
+: "${GIT:?Set GIT to the directory containing your Oldassity checkout}"
+exec python3 "$GIT/oldassity/scripts/sync-user-preferences.py" --commit "$@"
