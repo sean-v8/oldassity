@@ -340,7 +340,9 @@ bool ProjectFileManager::DoSave(const FilePath & fileName, const bool fromSaveAs
       wxULongLong fileSize = wxFileName::GetSize(projectFileIO.GetFileName());
 
       wxDiskspaceSize_t freeSpace;
-      if (wxGetDiskSpace(FileNames::AbbreviatePath(fileName), NULL, &freeSpace))
+      // In-place saves update the existing database and its journal.
+      if (fromSaveAs &&
+          wxGetDiskSpace(FileNames::AbbreviatePath(fileName), NULL, &freeSpace))
       {
          if (freeSpace.GetValue() <= fileSize.GetValue())
          {

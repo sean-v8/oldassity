@@ -1456,7 +1456,24 @@ void ProjectFileIO::Compact(
    {
       // Don't compact if this is a temporary project or if it's determined there are not
       // enough unused blocks to make it worthwhile.
-      if (IsTemporary() || !ShouldCompact(tracks))
+      bool shouldCompact = !IsTemporary() && ShouldCompact(tracks);
+      if (shouldCompact)
+      {
+         // The outbound database contains only retained blocks. Allow room
+         // for SQLite page overhead and the serialized project document.
+         wxLongLong freeSpace;
+         if (wxGetDiskSpace(wxPathOnly(mFileName), nullptr, &freeSpace))
+         {
+            const auto retained = GetCurrentUsage(tracks);
+            const auto estimatedSize = retained + retained / 10 + (16LL << 20);
+            if (freeSpace.GetValue() < estimatedSize)
+            {
+               wxLogDebug("Skipping automatic project compaction: insufficient space for the compacted copy.");
+               shouldCompact = false;
+            }
+         }
+      }
+      if (!shouldCompact)
       {
          // Delete the AutoSave doc it if exists
          if (IsModified())
