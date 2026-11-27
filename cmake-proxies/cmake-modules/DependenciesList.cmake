@@ -69,7 +69,11 @@ endif()
 
 audacity_find_package(RapidJSON REQUIRED)
 
-audacity_find_package(PortMidi OPTION_NAME midi)
+if("${audacity_use_midi}" STREQUAL "system")
+   audacity_find_package(PortMidi OPTION_NAME midi FIND_PACKAGE_OPTIONS MODULE)
+else()
+   audacity_find_package(PortMidi OPTION_NAME midi)
+endif()
 
 if(${_OPT}has_crashreports)
    audacity_find_package(breakpad REQUIRED)
